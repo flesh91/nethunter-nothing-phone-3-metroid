@@ -36,13 +36,18 @@ newest_bb() {
   (cd "$1" && { ls -v busybox_nh-* 2>/dev/null || ls busybox_nh-*; } | tail -n 1)
 }
 
-# джерело 64-бітного busybox: кеш → застосунок → найновіший 64-бітний у самому модулі NetHunter
+# Джерело 64-бітного busybox, який буде ВСТАНОВЛЕНО й ВИКОНАНО як root. Лише довірені, root-доставлені
+# джерела у пріоритеті; дані застосунку (APP_BB, 0700 app-uid) — в останню чергу й ніколи не виконуємо
+# до встановлення (інакше скомпрометований uid NetHunter підсунув би ELF, запущений від root — finding #1):
+#   1) власний 64-бітний busybox_nh-* у самому Magisk-модулі NetHunter (root-only, не app-writable)
+#   2) кеш у /data/adb (root-only)
+#   3) копія застосунку — лише якщо вище нічого немає, і не symlink
 pick_source() {
-  [ "$(elf_kind "$CACHE/busybox_nh")" = arm64 ] && { echo "$CACHE/busybox_nh"; return; }
-  [ "$(elf_kind "$APP_BB")" = arm64 ] && { echo "$APP_BB"; return; }
   for f in $(cd "$1" && { ls -v busybox_nh-* 2>/dev/null || ls busybox_nh-*; } | sort -r); do
-    [ "$(elf_kind "$1/$f")" = arm64 ] && { echo "$1/$f"; return; }
+    [ ! -L "$1/$f" ] && [ "$(elf_kind "$1/$f")" = arm64 ] && { echo "$1/$f"; return; }
   done
+  [ ! -L "$CACHE/busybox_nh" ] && [ "$(elf_kind "$CACHE/busybox_nh")" = arm64 ] && { echo "$CACHE/busybox_nh"; return; }
+  [ ! -L "$APP_BB" ] && [ "$(elf_kind "$APP_BB")" = arm64 ] && { echo "$APP_BB"; return; }
 }
 
 fix_dir() { # $1 = system/bin або system/xbin модуля NetHunter
@@ -103,6 +108,7 @@ APPDB=/data/data/com.offsec.nethunter/databases/CustomCommandsFragment
 # (містять CON_MODE_PATH) або наші попередні (позначка nethunter-kmods); змінені вручну — ні.
 patch_commands() {
   [ -f "$APPDB" ] || { log "NetHunter custom commands DB not found (app not set up yet or data locked)"; return 0; }
+  [ -L "$APPDB" ] && { log "custom commands DB is a symlink, refusing (possible attack)"; return 0; }
   [ -x "$KALI/usr/bin/python3" ] || { log "Kali chroot python3 not found, custom commands not patched"; return 0; }
   if pidof com.offsec.nethunter >/dev/null; then
     if [ "$1" = "--force-stop" ]; then
@@ -111,9 +117,14 @@ patch_commands() {
       log "NetHunter app is running, custom commands will be checked on next boot"; return 0
     fi
   fi
+  # Приватний каталог (mktemp -d = 0700, випадкове ім'я) у chroot /tmp: щоб БД, яку ми пишемо назад,
+  # і скрипт, який виконуємо як root, не можна було підмінити через передбачуваний шлях у світ-
+  # записуваному /tmp (symlink/race LPE, особливо коли NetHunter тримає SELinux у Permissive).
+  # Сам скрипт передаємо через stdin — на диск не лягає.
   mkdir -p "$KALI/tmp"
-  cp "$APPDB" "$KALI/tmp/nhkmods-cc.db" || return 1
-  cat > "$KALI/tmp/nhkmods-cc.py" <<'PY'
+  d="$(mktemp -d "$KALI/tmp/nhkmods.XXXXXX")" || return 1
+  cp "$APPDB" "$d/db" || { rm -rf "$d"; return 1; }
+  out="$(chroot "$KALI" /usr/bin/python3 - "/tmp/$(basename "$d")/db" <<'PY'
 import sqlite3, sys
 START = r"""echo -ne "\033]0;Wlan0 Monitor Mode\007" && clear; : nethunter-kmods; su -c 'nh-wlan monitor 6' && sleep 2 && exit"""
 STOP = r"""echo -ne "\033]0;Stopping Wlan0 Mon Mode\007" && clear; : nethunter-kmods; su -c 'nh-wlan managed' && sleep 2 && exit"""
@@ -131,12 +142,29 @@ for rid, label, cmd in c.execute("select id, CommandLabel, Command from CustomCo
         print(f"'{label}': customized by user, left unchanged")
 c.commit()
 PY
-  out="$(chroot "$KALI" /usr/bin/python3 /tmp/nhkmods-cc.py /tmp/nhkmods-cc.db 2>&1)"; rc=$?
+)"; rc=$?
   echo "$out" | while read -r l; do [ -n "$l" ] && log "custom commands: $l"; done
-  if [ $rc = 0 ] && ! cmp -s "$KALI/tmp/nhkmods-cc.db" "$APPDB"; then
-    cat "$KALI/tmp/nhkmods-cc.db" > "$APPDB" && log "custom commands database updated"
+  # Запис назад symlink-безпечно: root пише у приватний mktemp у теці БД (випадкове ім'я, O_EXCL),
+  # відновлює власника й SELinux-мітку застосунку, і атомарно rename-ить поверх. rename НЕ йде за
+  # symlink, тож ціль не можна підмінити на root-файл TOCTOU-гонкою (finding #2).
+  if [ $rc = 0 ] && ! cmp -s "$d/db" "$APPDB"; then
+    if [ -L "$APPDB" ]; then
+      log "custom commands DB became a symlink, refusing write-back"
+    else
+      own="$(stat -c '%u:%g' "$APPDB" 2>/dev/null)"
+      ctx="$(ls -Zd "$APPDB" 2>/dev/null | awk '{print $1}')"
+      t="$(mktemp "$(dirname "$APPDB")/.nhkmods-cc.XXXXXX")" || { rm -rf "$d"; return 0; }
+      if cat "$d/db" > "$t"; then
+        [ -n "$own" ] && chown "$own" "$t" 2>/dev/null
+        [ -n "$ctx" ] && chcon "$ctx" "$t" 2>/dev/null
+        chmod 660 "$t"
+        mv -f "$t" "$APPDB" && log "custom commands database updated" || { rm -f "$t"; log "custom commands write-back failed"; }
+      else
+        rm -f "$t"
+      fi
+    fi
   fi
-  rm -f "$KALI/tmp/nhkmods-cc.db" "$KALI/tmp/nhkmods-cc.py"
+  rm -rf "$d"
 }
 
 if [ "$1" = "commands" ]; then patch_commands "$2"; exit 0; fi
@@ -156,10 +184,13 @@ case "${1:-check}" in
     report_32bit
     ;;
   cache)
-    if [ "$(elf_kind "$APP_BB")" = arm64 ]; then
+    # Кешуємо app-busybox лише як ЗАПАСНЕ джерело (використовується, тільки якщо в модулі NetHunter
+    # немає жодного 64-бітного). НЕ виконуємо його заради банера версії — це app-writable байти, а код
+    # тут root (finding #1): запуск невірифікованого ELF від root недопустимий.
+    if [ ! -L "$APP_BB" ] && [ "$(elf_kind "$APP_BB")" = arm64 ]; then
       if ! cmp -s "$APP_BB" "$CACHE/busybox_nh"; then
         cp "$APP_BB" "$CACHE/busybox_nh.tmp" && chmod 755 "$CACHE/busybox_nh.tmp" && mv -f "$CACHE/busybox_nh.tmp" "$CACHE/busybox_nh"
-        log "cached 64-bit busybox from NetHunter app: $("$CACHE/busybox_nh" | head -1)"
+        log "cached fallback 64-bit busybox from NetHunter app ($(wc -c < "$CACHE/busybox_nh" 2>/dev/null) bytes, not executed)"
       fi
     fi
     # якщо фікс при старті не спрацював (не було джерела) — пробуємо зараз
