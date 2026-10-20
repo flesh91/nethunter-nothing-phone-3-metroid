@@ -1,0 +1,111 @@
+#!/system/bin/sh
+# nh-bt start|stop|status|run|install-bluebinder
+# Вбудований Bluetooth телефона → Linux hciN через міст nh-btbridge (AIDL HAL ↔ /dev/vhci).
+MODDIR=/data/adb/modules/nethunter-kmods
+BRIDGE="$MODDIR/system/bin/nh-btbridge"
+STATE=/data/adb/nethunter-kmods-bt
+LOG="$STATE/bridge.log"
+KALI=/data/local/nhsystem/kali-arm64
+mkdir -p "$STATE"
+
+bt_state() { dumpsys bluetooth_manager </dev/null 2>/dev/null | grep -m1 'State:' | tr -d ' ' | cut -d: -f2; }
+
+# settings/cmd передають свої stdin/stdout у system_server; під SELinux Enforcing він не може писати
+# у файли /data/adb (adb_data_file) — тому лише через pipe і з stdin=/dev/null
+sget() { settings get global "$1" </dev/null 2>/dev/null; }
+sput() { settings put global "$1" "$2" </dev/null >/dev/null 2>&1; }
+valid_setting() { case "$1" in 0|1|null) return 0;; *) return 1;; esac; }
+bridge_pid() { pidof nh-btbridge; }
+
+prepare() {
+  # «Bluetooth scanning» тримає HAL відкритим навіть при вимкненому BT (стан BLE_ON)
+  if [ ! -f "$STATE/ble_scan.saved" ]; then
+    v="$(sget ble_scan_always_enabled)"
+    if valid_setting "$v"; then echo "$v" > "$STATE/ble_scan.saved"
+    else echo "warning: could not read ble_scan_always_enabled ('$v'), it will not be restored automatically"; fi
+  fi
+  sput ble_scan_always_enabled 0
+  if [ "$(sget bluetooth_on)" = "1" ]; then
+    echo "Turning off Android Bluetooth (it stays off while the bridge is running)"
+    cmd bluetooth_manager disable </dev/null >/dev/null 2>&1
+  fi
+  i=0
+  while [ "$(bt_state)" != "OFF" ] && [ $i -lt 20 ]; do sleep 1; i=$((i+1)); done
+  [ "$(bt_state)" = "OFF" ] || { echo "Android Bluetooth did not turn off (state: $(bt_state))"; return 1; }
+  sleep 2   # HAL Qualcomm перезапускає свій процес після закриття
+  [ -c /dev/vhci ] || "$MODDIR/system/bin/nh-kmod" load >/dev/null
+  [ -c /dev/vhci ] || { echo "/dev/vhci missing (hci_vhci not loaded)"; return 1; }
+}
+
+restore() {
+  if [ -f "$STATE/ble_scan.saved" ]; then
+    v="$(cat "$STATE/ble_scan.saved")"
+    case "$v" in 0|1) sput ble_scan_always_enabled "$v";; esac
+    rm -f "$STATE/ble_scan.saved"
+  fi
+}
+
+hci_up() {
+  # без bluetoothd ядро лишає контролер вимкненим і без LE — вмикаємо через mgmt, якщо є Kali
+  [ -x "$KALI/usr/bin/btmgmt" ] || return 0
+  i=0; while [ ! -e /sys/class/bluetooth/hci0 ] && [ $i -lt 10 ]; do sleep 1; i=$((i+1)); done
+  for c in "power on" "le on"; do
+    chroot "$KALI" /usr/bin/env PATH=/usr/sbin:/usr/bin:/sbin:/bin timeout 8 btmgmt --index 0 $c >/dev/null 2>&1
+  done
+}
+
+case "$1" in
+  start)
+    [ -n "$(bridge_pid)" ] && { echo "bridge already running (pid $(bridge_pid))"; exit 0; }
+    prepare || exit 1
+    for try in 1 2 3; do
+      nohup "$BRIDGE" > "$LOG" 2>&1 &
+      sleep 4
+      [ -n "$(bridge_pid)" ] && break
+      echo "attempt $try failed: $(tail -1 "$LOG")"; sleep 2
+    done
+    [ -n "$(bridge_pid)" ] || { restore; exit 1; }
+    hci_up
+    echo "bridge running (pid $(bridge_pid)): $(ls /sys/class/bluetooth/ | tr '\n' ' ')"
+    ;;
+  run)
+    # передній план — для обгортки bluebinder у Kali chroot
+    [ -n "$(bridge_pid)" ] && { echo "bridge already running (pid $(bridge_pid))"; exit 0; }
+    prepare || exit 1
+    "$BRIDGE" &
+    child=$!
+    # NetHunter зупиняє bluebinder сигналом — передаємо його мосту, щоб він прибрав hci і закрив HAL
+    trap 'kill $child 2>/dev/null' TERM INT HUP
+    (sleep 5; hci_up) &
+    wait $child
+    wait $child 2>/dev/null
+    restore
+    ;;
+  stop)
+    p="$(bridge_pid)"
+    [ -n "$p" ] && kill $p
+    i=0; while [ -n "$(bridge_pid)" ] && [ $i -lt 10 ]; do sleep 1; i=$((i+1)); done
+    restore
+    echo "bridge stopped; Android Bluetooth can be turned on again"
+    ;;
+  status)
+    p="$(bridge_pid)"; [ -n "$p" ] && echo "bridge: running (pid $p)" || echo "bridge: stopped"
+    echo "Android BT: $(bt_state)  ble_scan_always_enabled=$(sget ble_scan_always_enabled)"
+    echo "hci: $(ls /sys/class/bluetooth/ 2>/dev/null | tr '\n' ' ')"
+    ;;
+  install-bluebinder)
+    # NetHunter Bluetooth Arsenal запускає bluebinder у chroot; той знає лише HIDL — підміняємо обгорткою
+    B="$KALI/usr/sbin/bluebinder"
+    [ -d "$KALI" ] || { echo "Kali chroot not found at $KALI"; exit 1; }
+    if [ -f "$B" ] && ! grep -q nh-btbridge "$B" 2>/dev/null; then mv "$B" "$B.hidl"; fi
+    cat > "$B" <<'EOF'
+#!/bin/sh
+# Обгортка nethunter-kmods: на цьому телефоні лише AIDL Bluetooth HAL, тож замість bluebinder
+# запускаємо nh-btbridge в Android-просторі (оригінал: /usr/sbin/bluebinder.hidl)
+exec chroot /proc/1/root /system/bin/sh /data/adb/modules/nethunter-kmods/system/bin/nh-bt run
+EOF
+    chmod 755 "$B"
+    echo "installed wrapper $B (original: $B.hidl)"
+    ;;
+  *) echo "usage: nh-bt start|stop|status|run|install-bluebinder"; exit 1 ;;
+esac

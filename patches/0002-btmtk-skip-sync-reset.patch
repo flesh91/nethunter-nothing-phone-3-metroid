@@ -1,0 +1,13 @@
+btmtk: без hci_cmd_sync_queue (не експортується в GKI KMI) — лише шлях аварійного скидання
+
+--- a/drivers/bluetooth/btmtk.c
++++ b/drivers/bluetooth/btmtk.c
+@@ -342,7 +342,7 @@
+ 
+ 	hci_dev_lock(hdev);
+ 
+-	err = hci_cmd_sync_queue(hdev, reset_work->reset_sync, NULL, NULL);
++	err = -EOPNOTSUPP; (void)reset_work; /* NetHunter/GKI: hci_cmd_sync_queue не експортується в KMI; донгл треба перепідключити */
+ 	if (err)
+ 		bt_dev_err(hdev, "failed to reset (%d)", err);
+ 

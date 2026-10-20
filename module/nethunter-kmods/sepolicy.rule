@@ -1,0 +1,8 @@
+allow kernel adb_data_file dir { search getattr }
+allow kernel adb_data_file file { read open getattr }
+allow kernel system_file dir { search getattr }
+allow kernel system_file file { read open getattr }
+allow magisk hal_bluetooth_service service_manager find
+allow magisk hal_bluetooth_default binder { call transfer }
+allow hal_bluetooth_default magisk binder { call transfer }
+allow magisk device chr_file { read write open ioctl getattr }

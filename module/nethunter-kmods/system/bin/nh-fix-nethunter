@@ -1,0 +1,186 @@
+#!/system/bin/sh
+# nh-fix-nethunter [boot|cache|commands|check]
+# Модуль NetHunter для Magisk постачає 32-бітні busybox_nh-*, а Nothing Phone (3) суто 64-бітний
+# (abilist=arm64-v8a, немає 32-бітного linker). post-fs-data.sh модуля NetHunter бере найновіший
+# busybox_nh-* і запускає його для створення посилань на applets — з 32-бітним файлом це падає,
+# і застосунок NetHunter після перезавантаження «не бачить» busybox і chroot.
+#
+#   boot  — (з post-fs-data) замінити 32-бітний найновіший busybox_nh-* 64-бітним і заново
+#           створити посилання скриптом модуля NetHunter
+#   cache — (з service.sh, після розблокування) зберегти 64-бітний busybox_nh із застосунку
+#           в /data/adb (дані застосунку зашифровані до першого розблокування)
+#   commands [--force-stop] — замінити в Custom Commands застосунку NetHunter стандартні
+#           «Start/Stop wlan0 monitor mode» на виклики nh-wlan (стандартні не ставлять канал і
+#           не чекають вимкнення Wi-Fi — монітор виходить «мертвим», 0 кадрів)
+#   su    — зробити su в модулі NetHunter посиланням на Magisk su (замість busybox)
+#   check — лише показати стан
+NH=/data/adb/modules/nethunter
+CACHE=/data/adb/nethunter-kmods-fix
+APP_BB=/data/data/com.offsec.nethunter/scripts/bin/busybox_nh
+mkdir -p "$CACHE"
+
+log() { echo "nh-fix-nethunter: $*"; }
+
+# перші 20 байт ELF: клас (байт 4: 1=32, 2=64) і e_machine (байти 18-19: b7 00 = aarch64)
+elf_kind() {
+  h=$(head -c 20 "$1" 2>/dev/null | od -An -tx1 | tr -d ' \n')
+  case "$h" in
+    7f454c4602*) [ "${h#????????????????????????????????????}" = "b700" ] && echo arm64 || echo 64other ;;
+    7f454c4601*) echo 32bit ;;
+    *) echo none ;;
+  esac
+}
+
+# найновіший busybox_nh-* так само, як його обирає post-fs-data.sh NetHunter
+newest_bb() {
+  (cd "$1" && { ls -v busybox_nh-* 2>/dev/null || ls busybox_nh-*; } | tail -n 1)
+}
+
+# джерело 64-бітного busybox: кеш → застосунок → найновіший 64-бітний у самому модулі NetHunter
+pick_source() {
+  [ "$(elf_kind "$CACHE/busybox_nh")" = arm64 ] && { echo "$CACHE/busybox_nh"; return; }
+  [ "$(elf_kind "$APP_BB")" = arm64 ] && { echo "$APP_BB"; return; }
+  for f in $(cd "$1" && { ls -v busybox_nh-* 2>/dev/null || ls busybox_nh-*; } | sort -r); do
+    [ "$(elf_kind "$1/$f")" = arm64 ] && { echo "$1/$f"; return; }
+  done
+}
+
+fix_dir() { # $1 = system/bin або system/xbin модуля NetHunter
+  d="$1"; [ -d "$d" ] || return 1
+  n="$(newest_bb "$d")"; [ -n "$n" ] || return 1
+  t="$d/$n"
+  [ "$(elf_kind "$t")" = 32bit ] || { log "$t is $(elf_kind "$t"), nothing to fix"; return 1; }
+  src="$(pick_source "$d")"
+  [ -n "$src" ] || { log "no 64-bit busybox source found, cannot fix $t"; return 1; }
+  [ -f "$CACHE/$n.32bit.orig" ] || cp -p "$t" "$CACHE/$n.32bit.orig"
+  cat "$src" > "$t.nhfix" && chmod 755 "$t.nhfix" && chown 0:0 "$t.nhfix" && mv -f "$t.nhfix" "$t" || {
+    log "failed to replace $t"; rm -f "$t.nhfix"; return 1; }
+  chcon u:object_r:system_file:s0 "$t" 2>/dev/null
+  log "replaced 32-bit $t with 64-bit $src (original saved in $CACHE)"
+  return 0
+}
+
+# NetHunter post-fs-data.sh створює посилання на всі applets busybox, яких немає в /system/bin.
+# На момент post-fs-data Magisk ще не змонтував свій su, тож з'являється su -> busybox_nh, який
+# затіняє Magisk su. NetHunter Terminal до того ж губить /product/bin з PATH (немає ':'), тому
+# «su» там — це busybox: «su: unknown user root». Робимо su посиланням на Magisk su і не даємо
+# скрипту NetHunter створити su -> busybox знову.
+magisk_su() {
+  p="$(magisk --path 2>/dev/null)"
+  [ -n "$p" ] && [ -e "$p/su" ] && { echo "$p/su"; return 0; }
+  for c in /debug_ramdisk/su /sbin/su; do [ -e "$c" ] && { echo "$c"; return 0; }; done
+  return 1
+}
+
+fix_su() {
+  f="$NH/post-fs-data.sh"
+  if [ -f "$f" ] && ! grep -q 'nethunter-kmods: skip su' "$f"; then
+    sed -i 's|^for applet in \$(\$XBIN/busybox_nh --list); do$|&\n  [ "$applet" = su ] \&\& continue # nethunter-kmods: skip su (shadows Magisk su)|' "$f"
+    grep -q 'nethunter-kmods: skip su' "$f" && log "patched NetHunter post-fs-data.sh: no su -> busybox link"
+  fi
+  msu="$(magisk_su)" || { log "Magisk su not found, su link left unchanged"; return 1; }
+  for d in "$NH/system/bin" "$NH/system/xbin"; do
+    s="$d/su"
+    [ -L "$s" ] || continue
+    t="$(readlink "$s")"
+    if [ "$t" = busybox_nh ] || [ "$t" = "$d/busybox_nh" ] || { [ "$t" != "$msu" ] && [ ! -e "$t" ]; }; then
+      ln -sf "$msu" "$s" && log "NetHunter module: su now points to Magisk su ($msu) instead of $t"
+    fi
+  done
+}
+
+report_32bit() {
+  find "$NH" -type f 2>/dev/null | while read -r f; do
+    [ "$(elf_kind "$f")" = 32bit ] && log "32-bit binary (will not run on this phone): ${f#$NH/}"
+  done
+}
+
+KALI=/data/local/nhsystem/kali-arm64
+APPDB=/data/data/com.offsec.nethunter/databases/CustomCommandsFragment
+
+# Патч бази Custom Commands: на копії через python3 з Kali, потім запис у той самий файл
+# (власник і SELinux-мітка застосунку зберігаються). Чіпаємо лише стандартні команди NetHunter
+# (містять CON_MODE_PATH) або наші попередні (позначка nethunter-kmods); змінені вручну — ні.
+patch_commands() {
+  [ -f "$APPDB" ] || { log "NetHunter custom commands DB not found (app not set up yet or data locked)"; return 0; }
+  [ -x "$KALI/usr/bin/python3" ] || { log "Kali chroot python3 not found, custom commands not patched"; return 0; }
+  if pidof com.offsec.nethunter >/dev/null; then
+    if [ "$1" = "--force-stop" ]; then
+      am force-stop com.offsec.nethunter </dev/null >/dev/null 2>&1; sleep 1
+    else
+      log "NetHunter app is running, custom commands will be checked on next boot"; return 0
+    fi
+  fi
+  mkdir -p "$KALI/tmp"
+  cp "$APPDB" "$KALI/tmp/nhkmods-cc.db" || return 1
+  cat > "$KALI/tmp/nhkmods-cc.py" <<'PY'
+import sqlite3, sys
+START = r"""echo -ne "\033]0;Wlan0 Monitor Mode\007" && clear; : nethunter-kmods; su -c 'nh-wlan monitor 6' && sleep 2 && exit"""
+STOP = r"""echo -ne "\033]0;Stopping Wlan0 Mon Mode\007" && clear; : nethunter-kmods; su -c 'nh-wlan managed' && sleep 2 && exit"""
+NEW = {"Start wlan0 in monitor mode": START, "Stop wlan0 monitor mode": STOP}
+c = sqlite3.connect(sys.argv[1])
+for rid, label, cmd in c.execute("select id, CommandLabel, Command from CustomCommandsFragment").fetchall():
+    if label not in NEW:
+        continue
+    if cmd == NEW[label]:
+        print(f"'{label}': already uses nh-wlan")
+    elif "CON_MODE_PATH" in cmd or "nethunter-kmods" in cmd:
+        c.execute("update CustomCommandsFragment set Command=?, RuntimeEnv='android' where id=?", (NEW[label], rid))
+        print(f"'{label}': replaced with nh-wlan")
+    else:
+        print(f"'{label}': customized by user, left unchanged")
+c.commit()
+PY
+  out="$(chroot "$KALI" /usr/bin/python3 /tmp/nhkmods-cc.py /tmp/nhkmods-cc.db 2>&1)"; rc=$?
+  echo "$out" | while read -r l; do [ -n "$l" ] && log "custom commands: $l"; done
+  if [ $rc = 0 ] && ! cmp -s "$KALI/tmp/nhkmods-cc.db" "$APPDB"; then
+    cat "$KALI/tmp/nhkmods-cc.db" > "$APPDB" && log "custom commands database updated"
+  fi
+  rm -f "$KALI/tmp/nhkmods-cc.db" "$KALI/tmp/nhkmods-cc.py"
+}
+
+if [ "$1" = "commands" ]; then patch_commands "$2"; exit 0; fi
+
+[ -d "$NH" ] || { log "NetHunter Magisk module not installed, nothing to do"; exit 0; }
+
+case "${1:-check}" in
+  boot)
+    fixed=0
+    for d in "$NH/system/bin" "$NH/system/xbin"; do fix_dir "$d" && fixed=1; done
+    fix_su   # спершу патчимо скрипт NetHunter, щоб повторний запуск не повернув su -> busybox
+    if [ $fixed = 1 ] && [ -f "$NH/post-fs-data.sh" ]; then
+      # наш скрипт міг відпрацювати після NetHunter — перестворюємо посилання на applets вже з робочим busybox
+      sh "$NH/post-fs-data.sh" >/dev/null 2>&1 && log "re-ran NetHunter post-fs-data.sh (applet links recreated)"
+      fix_su
+    fi
+    report_32bit
+    ;;
+  cache)
+    if [ "$(elf_kind "$APP_BB")" = arm64 ]; then
+      if ! cmp -s "$APP_BB" "$CACHE/busybox_nh"; then
+        cp "$APP_BB" "$CACHE/busybox_nh.tmp" && chmod 755 "$CACHE/busybox_nh.tmp" && mv -f "$CACHE/busybox_nh.tmp" "$CACHE/busybox_nh"
+        log "cached 64-bit busybox from NetHunter app: $("$CACHE/busybox_nh" | head -1)"
+      fi
+    fi
+    # якщо фікс при старті не спрацював (не було джерела) — пробуємо зараз
+    for d in "$NH/system/bin" "$NH/system/xbin"; do fix_dir "$d" >/dev/null && log "fixed $d after unlock"; done
+    # застосунок міг скинути дані й повернути стандартні команди
+    patch_commands
+    ;;
+  su)
+    fix_su
+    ;;
+  check)
+    for d in "$NH/system/bin" "$NH/system/xbin"; do
+      [ -d "$d" ] || continue
+      n="$(newest_bb "$d")"; log "active: $d/$n ($(elf_kind "$d/$n"))"
+    done
+    log "cache: $CACHE/busybox_nh ($(elf_kind "$CACHE/busybox_nh"))"
+    log "app:   $APP_BB ($(elf_kind "$APP_BB"))"
+    busybox_nh 2>/dev/null | head -1 | sed 's/^/nh-fix-nethunter: system busybox_nh: /' || log "system busybox_nh does not run"
+    log "su in NetHunter module: $(readlink "$NH/system/bin/su" 2>/dev/null || echo none); /system/bin/su -> $(readlink /system/bin/su 2>/dev/null || echo none)"
+    report_32bit
+    ;;
+  *) echo "usage: nh-fix-nethunter boot|cache|commands [--force-stop]|su|check"; exit 1 ;;
+esac
+exit 0

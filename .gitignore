@@ -1,0 +1,40 @@
+# --- Великі завантаження (відтворюються tools/fetch-sources.sh і tools/build-all.sh) ---
+/dl/
+/nothing_archive/
+
+# --- Пропрієтарні образи Nothing і персональні дані пристрою (НЕ публікувати) ---
+/fw/
+/stock/
+
+# --- Пропрієтарні системні бібліотеки, витягнуті з пристрою (adb pull; tools/fetch-devlibs.sh) ---
+/btbridge/devlibs/
+
+# --- Артефакти збірки ---
+/build/
+/out/
+*.o
+*.ko
+*.pyc
+__pycache__/
+*.cmd
+Module.symvers
+/btbridge/nh-btbridge
+
+# --- Зібрані частини модуля (у репозиторії лише джерело; готовий zip — у Releases) ---
+/module/nethunter-kmods/modules/
+/module/nethunter-kmods/firmware/
+/module/nethunter-kmods/system/bin/nh-btbridge
+/module/nethunter-kmods/*.log
+
+# --- Сторонні драйвери: клонуються tools/fetch-oot.sh ---
+/oot/8812au-20210820/
+/oot/8814au/
+/oot/rtl8188eus/
+# Згенеровані prepare.sh (GPL-вихідники ядра, не зберігаємо):
+/oot/rc80211_minstrel_ht/minstrel_ht_core.c
+/oot/rc80211_minstrel_ht/rc80211_minstrel_ht.h
+/oot/rc80211_minstrel_ht/frame_duration.c
+
+# --- Службове ---
+.DS_Store
+*.swp

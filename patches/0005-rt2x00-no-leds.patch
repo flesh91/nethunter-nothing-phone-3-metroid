@@ -1,0 +1,13 @@
+rt2x00: без LED (led_classdev_suspend/resume не експортуються в GKI KMI)
+
+--- a/drivers/net/wireless/ralink/rt2x00/Kconfig
++++ b/drivers/net/wireless/ralink/rt2x00/Kconfig
+@@ -251,7 +251,7 @@
+ 
+ config RT2X00_LIB_LEDS
+ 	bool
+-	default y if (RT2X00_LIB=y && LEDS_CLASS=y) || (RT2X00_LIB=m && LEDS_CLASS!=n)
++	default n # NetHunter/GKI: led_classdev_suspend/resume не експортуються в KMI
+ 
+ config RT2X00_LIB_DEBUGFS
+ 	bool "Ralink debugfs support"

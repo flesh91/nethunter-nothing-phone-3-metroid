@@ -1,0 +1,13 @@
+rtw88: локальний bcd2bin (_bcd2bin не експортується в GKI KMI)
+
+--- a/drivers/net/wireless/realtek/rtw88/phy.c
++++ b/drivers/net/wireless/realtek/rtw88/phy.c
+@@ -1130,7 +1130,7 @@
+ }
+ EXPORT_SYMBOL(rtw_parse_tbl_phy_cond);
+ 
+-#define bcd_to_dec_pwr_by_rate(val, i) bcd2bin(val >> (i * 8))
++#define bcd_to_dec_pwr_by_rate(val, i) const_bcd2bin((u8)((val) >> ((i) * 8)))
+ 
+ static u8 tbl_to_dec_pwr_by_rate(struct rtw_dev *rtwdev, u32 hex, u8 i)
+ {

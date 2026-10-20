@@ -1,0 +1,5 @@
+obj-m := rc80211_minstrel_ht.o
+rc80211_minstrel_ht-y := nh_minstrel_mod.o minstrel_ht_core.o frame_duration.o
+# ieee80211_frame_duration() — внутрішня (не експортована) функція mac80211; беремо її копію під іншим ім'ям.
+ccflags-y += -I$(srctree)/net/mac80211 -DCONFIG_MAC80211_RC_MINSTREL=1 -Dieee80211_frame_duration=nh_ieee80211_frame_duration
+# CONFIG_MAC80211_RC_MINSTREL використовується лише в rate.h:98 (прототипи init/exit) — на розкладку структур не впливає.

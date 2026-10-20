@@ -1,0 +1,14 @@
+ath9k_htc: не вмикати примусово MAC80211_LEDS
+
+Вендорський mac80211 (Qualcomm, sun_perf.config) зібраний без MAC80211_LEDS.
+Код LED у ath9k_htc і так під #ifdef CONFIG_MAC80211_LEDS.
+--- a/drivers/net/wireless/ath/ath9k/Kconfig
++++ b/drivers/net/wireless/ath/ath9k/Kconfig
+@@ -174,7 +174,6 @@
+ config ATH9K_HTC
+ 	tristate "Atheros HTC based wireless cards support"
+ 	depends on USB && MAC80211
+-	select MAC80211_LEDS if LEDS_CLASS=y || LEDS_CLASS=MAC80211
+ 	select ATH9K_HW
+ 	select ATH9K_COMMON
+ 	help

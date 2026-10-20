@@ -1,0 +1,13 @@
+mt7601u: без firmware_request_cache (не експортується в GKI KMI)
+
+--- a/drivers/net/wireless/mediatek/mt7601u/mcu.c
++++ b/drivers/net/wireless/mediatek/mt7601u/mcu.c
+@@ -414,7 +414,7 @@
+ 					 MT_USB_DMA_CFG_TX_BULK_EN));
+ 
+ 	if (firmware_running(dev))
+-		return firmware_request_cache(dev->dev, MT7601U_FIRMWARE);
++		return 0; /* NetHunter/GKI: firmware_request_cache не експортується в KMI; кеш лише для suspend */
+ 
+ 	ret = request_firmware(&fw, MT7601U_FIRMWARE, dev->dev);
+ 	if (ret)

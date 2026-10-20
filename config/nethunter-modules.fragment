@@ -1,0 +1,81 @@
+# NetHunter для Nothing Phone (3) — лише модулі (=m), ядро Image лишається гугловим GKI.
+# cfg80211/mac80211 потрібні лише для збірки: на телефоні використовуються вендорські (Qualcomm) з vendor_dlkm.
+CONFIG_CFG80211=m
+CONFIG_MAC80211=m
+# Підопції — точно як у Qualcomm (arch/arm64/configs/vendor/sun_perf.config у дереві Nothing),
+# інакше не збігаються CRC wiphy_new_nm / ieee80211_alloc_hw_nm і розкладка внутрішніх структур mac80211.
+CONFIG_NL80211_TESTMODE=y
+# CONFIG_CFG80211_CRDA_SUPPORT is not set
+# CONFIG_CFG80211_WEXT is not set
+# CONFIG_MAC80211_LEDS is not set
+# CONFIG_MAC80211_MESH is not set
+# CONFIG_MAC80211_DEBUGFS is not set
+# CONFIG_MAC80211_RC_MINSTREL is not set
+CONFIG_MAC80211_RC_DEFAULT=""
+
+# --- USB Wi-Fi з monitor mode + injection (in-tree) ---
+CONFIG_WLAN_VENDOR_ATH=y
+CONFIG_ATH9K_HTC=m
+# CONFIG_CARL9170 — неможливо на стоковому GKI: старий AR9170; потрібні usb_poison_anchored_urbs та ін. поза KMI
+CONFIG_WLAN_VENDOR_RALINK=y
+CONFIG_RT2X00=m
+CONFIG_RT2500USB=m
+CONFIG_RT73USB=m
+CONFIG_RT2800USB=m
+CONFIG_RT2800USB_RT33XX=y
+CONFIG_RT2800USB_RT35XX=y
+CONFIG_RT2800USB_RT3573=y
+CONFIG_RT2800USB_RT53XX=y
+CONFIG_RT2800USB_RT55XX=y
+CONFIG_RT2800USB_UNKNOWN=y
+CONFIG_WLAN_VENDOR_REALTEK=y
+CONFIG_RTL8187=m
+CONFIG_RTL8XXXU=m
+CONFIG_RTL8XXXU_UNTESTED=y
+CONFIG_RTW88=m
+CONFIG_RTW88_8822BU=m
+CONFIG_RTW88_8821CU=m
+CONFIG_RTW88_8723DU=m
+CONFIG_WLAN_VENDOR_MEDIATEK=y
+CONFIG_MT7601U=m
+CONFIG_MT76x0U=m
+CONFIG_MT76x2U=m
+CONFIG_MT7663U=m
+CONFIG_MT7921U=m
+CONFIG_WLAN_VENDOR_ZYDAS=y
+# CONFIG_ZD1211RW — неможливо на стоковому GKI: старий ZD1211; usb_wait_anchor_empty_timeout поза KMI
+CONFIG_EEPROM_93CX6=m
+
+# --- Bluetooth: USB-донгли + VHCI (bluebinder для вбудованого BT) ---
+CONFIG_BT_HCIBTUSB=m
+CONFIG_BT_HCIBTUSB_BCM=y
+CONFIG_BT_HCIBTUSB_RTL=y
+CONFIG_BT_HCIBTUSB_MTK=y
+CONFIG_BT_ATH3K=m
+CONFIG_BT_HCIBCM203X=m
+# CONFIG_BT_HCIBPA10X — неможливо на стоковому GKI: hci_set_fw_info захищений у GKI bluetooth.ko
+CONFIG_BT_HCIBFUSB=m
+CONFIG_BT_HCIVHCI=m
+
+# --- USB-serial (UART-адаптери для hardware hacking, модеми) ---
+CONFIG_USB_SERIAL_CH341=m
+CONFIG_USB_SERIAL_CP210X=m
+CONFIG_USB_SERIAL_PL2303=m
+CONFIG_USB_SERIAL_WWAN=m
+CONFIG_USB_SERIAL_OPTION=m
+CONFIG_USB_SERIAL_QUALCOMM=m
+
+# --- USB-мережа ---
+# CONFIG_USB_NET_RNDIS_HOST — неможливо на стоковому GKI: usbnet_cdc_unbind захищений у GKI cdc_ether.ko
+CONFIG_USB_NET_SMSC95XX=m
+# CONFIG_USB_NET_DM9601 — неможливо на стоковому GKI: usbnet_link_change/mii_link_ok захищені у GKI
+# CONFIG_USB_NET_MCS7830 — неможливо на стоковому GKI: usbnet_link_change захищений у GKI
+# CONFIG_USB_NET_QMI_WWAN — неможливо на стоковому GKI: usbnet_get_ethernet_addr захищений; netdev_upper_get_next_dev_rcu поза KMI
+# CONFIG_USB_NET_CDC_MBIM — неможливо на стоковому GKI: експорти cdc_ncm поза KMI
+
+# --- CAN (car hacking): USB-адаптери + протоколи ---
+CONFIG_CAN_GS_USB=m
+CONFIG_CAN_8DEV_USB=m
+CONFIG_CAN_PEAK_USB=m
+# CONFIG_CAN_ISOTP — неможливо на стоковому GKI: can_proto_register та ін. захищені у GKI can.ko → ISO-TP у userspace (python-can-isotp)
+# CONFIG_CAN_J1939 — неможливо на стоковому GKI: те саме, що ISOTP → userspace (python j1939)

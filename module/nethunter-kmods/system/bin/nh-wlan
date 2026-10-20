@@ -1,0 +1,94 @@
+#!/system/bin/sh
+# nh-wlan monitor [канал, типово 6] | managed | channel <канал> | status
+# Глобальний monitor mode вбудованого Wi-Fi (Qualcomm qcacld-3.0, параметр con_mode=4).
+# Без явно виставленого каналу інтерфейс у моніторі не приймає жодного кадру (NO-CARRIER) —
+# тому monitor завжди ставить канал (типово 6).
+# Лише приймання: injection у цьому режимі драйвер не підтримує. Паралельний монітор поряд
+# із підключенням теж ні — тому на час монітора Wi-Fi в Android вимикається.
+STATE=/data/adb/nethunter-kmods-wlan
+IFACE=wlan0
+mkdir -p "$STATE"
+
+# параметр con_mode завантаженого драйвера (qca_cld3_wcn7750 на Phone (3))
+con_mode_param() {
+  for p in /sys/module/qca_cld3_*/parameters/con_mode /sys/module/wlan/parameters/con_mode; do
+    [ -w "$p" ] && { echo "$p"; return 0; }
+  done
+  return 1
+}
+
+# iw: в Android його немає; /system/bin/iw з'являється лише після запуску застосунку NetHunter,
+# тому запасний варіант — iw з Kali chroot (працює без змонтованих /proc і /dev)
+KALI=/data/local/nhsystem/kali-arm64
+iw() {
+  if command -v iw >/dev/null 2>&1 && [ "$(command -v iw)" != "iw" ]; then command iw "$@"
+  elif [ -x "$KALI/usr/sbin/iw" ]; then chroot "$KALI" /usr/sbin/iw "$@"
+  else echo "iw not found (install NetHunter Kali chroot)" >&2; return 127; fi
+}
+
+# ARPHRD: 1 = ethernet (managed), 803 = radiotap (monitor)
+iface_type() { cat /sys/class/net/$IFACE/type 2>/dev/null; }
+# cmd передає stdin/stdout у system_server — лише pipe і stdin=/dev/null (SELinux Enforcing)
+wifi_enabled() { cmd wifi status </dev/null 2>/dev/null | grep -q "Wifi is enabled"; }
+
+wait_for() { # $1=опис, $2=команда-умова, $3=секунди
+  i=0
+  while ! eval "$2"; do
+    i=$((i+1)); [ $i -ge "$3" ] && { echo "timeout waiting for $1"; return 1; }
+    sleep 1
+  done
+}
+
+set_channel() {
+  iw dev $IFACE set channel "$1" 2>&1 && echo "channel: $1" || { echo "failed to set channel $1"; return 1; }
+}
+
+P="$(con_mode_param)" || { echo "qcacld con_mode parameter not found"; exit 1; }
+
+case "$1" in
+  monitor)
+    if [ "$(cat "$P")" = "4" ] && [ "$(iface_type)" = "803" ]; then
+      echo "already in monitor mode"
+    else
+      # запам'ятовуємо, чи був увімкнений Wi-Fi, щоб managed повернув як було
+      [ -f "$STATE/wifi_was_enabled" ] || { wifi_enabled && echo 1 || echo 0; } > "$STATE/wifi_was_enabled"
+      if wifi_enabled; then
+        echo "Turning off Android Wi-Fi (internet via mobile data while monitoring)"
+        cmd wifi set-wifi-enabled disabled </dev/null >/dev/null 2>&1
+        wait_for "Wi-Fi off" '! wifi_enabled' 15 || exit 1
+        sleep 2
+      fi
+      echo 4 > "$P" || { echo "failed to write con_mode"; exit 1; }
+      wait_for "monitor interface" '[ "$(iface_type)" = "803" ]' 10 || { echo 0 > "$P"; exit 1; }
+      ip link set $IFACE up || exit 1
+      echo "monitor mode: $IFACE (receive only, no injection)"
+    fi
+    set_channel "${2:-6}"
+    ;;
+  channel)
+    [ -n "$2" ] || { echo "usage: nh-wlan channel <N>"; exit 1; }
+    [ "$(iface_type)" = "803" ] || { echo "not in monitor mode (run: nh-wlan monitor)"; exit 1; }
+    set_channel "$2"
+    ;;
+  managed)
+    if [ "$(cat "$P")" != "0" ] || [ "$(iface_type)" = "803" ]; then
+      ip link set $IFACE down 2>/dev/null
+      echo 0 > "$P" || { echo "failed to write con_mode"; exit 1; }
+      wait_for "managed interface" '[ "$(iface_type)" = "1" ]' 10
+      echo "driver back in normal mode"
+    fi
+    was="$(cat "$STATE/wifi_was_enabled" 2>/dev/null || echo 1)"
+    rm -f "$STATE/wifi_was_enabled"
+    if [ "$was" = "1" ] && ! wifi_enabled; then
+      cmd wifi set-wifi-enabled enabled </dev/null >/dev/null 2>&1
+      wait_for "Wi-Fi on" 'wifi_enabled' 15 && echo "Android Wi-Fi turned back on"
+    fi
+    ;;
+  status)
+    echo "con_mode: $(cat "$P") ($P)"
+    case "$(iface_type)" in 803) echo "$IFACE: monitor";; 1) echo "$IFACE: managed";; "") echo "$IFACE: absent";; *) echo "$IFACE: type $(iface_type)";; esac
+    iw dev $IFACE info 2>/dev/null | grep -E "channel" | sed 's/^[[:space:]]*//'
+    wifi_enabled && echo "Android Wi-Fi: on" || echo "Android Wi-Fi: off"
+    ;;
+  *) echo "usage: nh-wlan monitor [channel, default 6] | managed | channel <N> | status"; exit 1 ;;
+esac

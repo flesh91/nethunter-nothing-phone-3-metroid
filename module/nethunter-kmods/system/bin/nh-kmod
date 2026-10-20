@@ -1,0 +1,70 @@
+#!/system/bin/sh
+# nh-kmod load|unload|status|autoload on|off — керування NetHunter-модулями ядра
+MODDIR=/data/adb/modules/nethunter-kmods
+FWDIR="$MODDIR/firmware"
+FWPARAM=/sys/module/firmware_class/parameters/path
+
+modname() { n=${1##*/}; n=${n%.ko}; echo "$n" | tr '-' '_'; }
+
+fw_add() {
+  cur="$(cat $FWPARAM 2>/dev/null)"
+  case ",$cur," in *",$FWDIR,"*) return 0;; esac
+  new="${cur%,}"; [ -n "$new" ] && new="$new,$FWDIR" || new="$FWDIR"
+  echo -n "$new" > $FWPARAM && echo "firmware path: $(cat $FWPARAM)"
+}
+
+case "$1" in
+  load)
+    want="$(cat "$MODDIR/kernel.release" 2>/dev/null)"
+    if [ "$(uname -r)" != "$want" ]; then
+      echo "Kernel $(uname -r) != $want (Nothing OS update?) - not loading modules, rebuild required"
+      exit 2
+    fi
+    if [ -f "$MODDIR/crashed-on" ]; then
+      echo "Warning: last time the phone rebooted while loading $(cat "$MODDIR/crashed-on")"
+      rm -f "$MODDIR/crashed-on"
+    fi
+    fw_add
+    ok=0; fail=0
+    while read -r f; do
+      [ -z "$f" ] && continue
+      if [ -d "/sys/module/$(modname "$f")" ]; then
+        [ "$f" = "rc80211_minstrel_ht.ko" ] && echo -n minstrel_ht > /sys/module/mac80211/parameters/ieee80211_default_rc_algo
+        continue
+      fi
+      # маркер на диску до insmod: якщо ядро впаде, service.sh побачить його і не повторюватиме
+      echo "$f" > "$MODDIR/loading"; sync
+      if err="$(insmod "$MODDIR/modules/$f" 2>&1)"; then ok=$((ok+1))
+      else fail=$((fail+1)); echo "FAIL $f: $err"; fi
+      # вендорський mac80211 зібраний без rate control: після minstrel робимо його типовим
+      if [ "$f" = "rc80211_minstrel_ht.ko" ]; then
+        echo -n minstrel_ht > /sys/module/mac80211/parameters/ieee80211_default_rc_algo
+        echo "rate control: $(cat /sys/module/mac80211/parameters/ieee80211_default_rc_algo)"
+      fi
+    done < "$MODDIR/modules.order"
+    rm -f "$MODDIR/loading"; sync
+    echo "loaded=$ok failed=$fail"
+    if [ ! -f "$MODDIR/autoload" ]; then
+      touch "$MODDIR/autoload"
+      echo "Autoload on boot enabled (disable: nh-kmod autoload off)"
+    fi
+    [ "$fail" -gt 0 ] && dmesg | grep -iE 'protected|disagrees|Unknown symbol|exports' | tail -20
+    ;;
+  unload)
+    tac "$MODDIR/modules.order" 2>/dev/null | while read -r f; do
+      [ -d "/sys/module/$(modname "$f")" ] && rmmod "$(modname "$f")" 2>/dev/null
+    done; echo done ;;
+  status)
+    while read -r f; do
+      n=$(modname "$f"); [ -d "/sys/module/$n" ] && echo "[+] $n" || echo "[ ] $n"
+    done < "$MODDIR/modules.order"
+    echo "firmware path: $(cat $FWPARAM 2>/dev/null)"
+    [ -f "$MODDIR/autoload" ] && echo "autoload: on" || echo "autoload: off" ;;
+  autoload)
+    case "$2" in
+      on) rm -f "$MODDIR/loading" "$MODDIR/crashed-on"; touch "$MODDIR/autoload"; echo "autoload: on" ;;
+      off) rm -f "$MODDIR/autoload"; echo "autoload: off" ;;
+      *) [ -f "$MODDIR/autoload" ] && echo "autoload: on" || echo "autoload: off" ;;
+    esac ;;
+  *) echo "usage: nh-kmod load|unload|status|autoload [on|off]"; exit 1 ;;
+esac
