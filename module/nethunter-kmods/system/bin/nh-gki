@@ -1,0 +1,132 @@
+#!/system/bin/sh
+# nh-gki load|unload|status|autoload [on|off]
+# Extra kernel features of the NetHunter boot kernel (variant B, see kernel-recipe/): CAN ISO-TP/J1939
+# and more USB CAN adapters, Bluetooth PAN (BNEP) and BPA10x, USB RNDIS/QMI/MBIM/DM9601/MCS7830
+# networking, PN533 NFC readers, NFS client and server, netlink diag, CAN-id tc ematch.
+# They exist only in that kernel, so on the stock kernel this does nothing.
+# What to load and in which order comes from gki/load.order (written by tools/add-gki-extras.sh):
+#   <file> new|parent:<symbol> <depends csv>
+# A "parent" is a module Google also ships, but with exports trimmed away that our new modules need
+# (e.g. can.ko, cdc_ncm.ko, nfc.ko): our build replaces Google's copy; if ours fails to load,
+# Google's copy is put back. Modules holding a parent are unloaded first (if idle) and reloaded after.
+# Loaded on boot by gki-boot.sh (default on); lives until reboot.
+MODDIR="${NH_GKI_MODDIR:-/data/adb/modules/nethunter-kmods}"
+G="$MODDIR/gki"
+ORDER="$G/load.order"
+LOG="$G/load.log"
+MARK="$G/loading"
+OFF="$G/autoload-off"
+SYSD=/system_dlkm/lib/modules
+[ -f "$SYSD/modules.dep" ] || SYSD=/system/lib/modules
+
+say() { echo "$*"; echo "[$(date '+%F %T')] $*" >> "$LOG" 2>/dev/null; }
+n_() { echo "$1" | tr - _; }                       # module name: '-' and '_' are the same to the kernel
+loaded() { grep -q "^$(n_ "$1") " /proc/modules; }
+# our parent builds keep exports Google trimmed: their __ksymtab entry tells them apart
+exports() { grep -qE " __ksymtab_$1([[:space:]]|\$)" /proc/kallsyms; }
+ours_kernel() { [ -f "$G/kernel.version" ] && [ "$(cat /proc/version)" = "$(cat "$G/kernel.version")" ]; }
+gki() { modprobe -d "$SYSD" "$1" >/dev/null 2>>"$LOG"; }  # Google's module from system_dlkm (+deps)
+shipped() { awk '{print $1}' "$ORDER" | tr - _ | grep -qx "$(n_ "$1")"; }
+file_of() { awk -v n="$(n_ "$1")" '{f=$1; gsub("-","_",f); if (f==n) print $1}' "$ORDER"; }
+ins() { # $1 = shipped file name without .ko
+  loaded "$1" && return 0
+  echo "$1" > "$MARK"; sync    # if the phone dies inside insmod, gki-boot.sh turns autoload off
+  insmod "$G/$1.ko" 2>>"$LOG"
+}
+# put a module back after a parent swap: ours if shipped, the nethunter-kmods copy, else Google's
+reload() {
+  for d in $1; do
+    if shipped "$d"; then ins "$(file_of "$d")"
+    elif [ -f "$MODDIR/modules/$d.ko" ]; then insmod "$MODDIR/modules/$d.ko" 2>>"$LOG"
+    elif [ -f "$MODDIR/modules/$(echo "$d" | tr _ -).ko" ]; then insmod "$MODDIR/modules/$(echo "$d" | tr _ -).ko" 2>>"$LOG"
+    else gki "$d"; fi
+  done
+}
+# parent FILE SYMBOL: our build of FILE in place of Google's
+parent() {
+  f=$1 sym=$2 name="$(n_ "$1")"
+  if loaded "$name" && exports "$sym"; then return 0; fi
+  back=""
+  if loaded "$name"; then
+    for h in $(ls "/sys/module/$name/holders" 2>/dev/null); do
+      rmmod "$h" 2>>"$LOG" || { say "$name: $h is in use - keeping Google's $name"; reload "$back"; return 1; }
+      back="$back $h"
+    done
+    rmmod "$name" 2>>"$LOG" || { say "$name: in use - keeping Google's copy"; reload "$back"; return 1; }
+  fi
+  if ins "$f"; then reload "$back"; return 0; fi
+  say "$name: our build did not load - restoring Google's copy"
+  gki "$name"; reload "$back"; return 1
+}
+
+load() {
+  if [ ! -f "$ORDER" ]; then say "NetHunter-kernel features are not included in this build of the module"; return 0; fi
+  if ! ours_kernel; then say "Not the NetHunter kernel - its extra features stay idle"; return 0; fi
+  ok=""; bad=""; failed=" "
+  while read -r f kind deps; do
+    [ -n "$f" ] || continue
+    skip=""
+    for d in $(echo "$deps" | tr , ' '); do
+      [ "$d" = "-" ] && continue
+      case "$failed" in *" $(n_ "$d") "*) skip="$d"; break ;; esac
+      shipped "$d" || loaded "$d" || gki "$d" || { skip="$d"; break; }
+    done
+    if [ -n "$skip" ]; then bad="$bad $f(needs $skip)"; failed="$failed$(n_ "$f") "; continue; fi
+    case "$kind" in
+      parent:*) if parent "$f" "${kind#parent:}"; then ok="$ok $f*"; else bad="$bad $f"; failed="$failed$(n_ "$f") "; fi ;;
+      *)        if ins "$f"; then ok="$ok $f"; else bad="$bad $f"; failed="$failed$(n_ "$f") "; fi ;;
+    esac
+  done < "$ORDER"
+  rm -f "$MARK"; sync
+  say "Loaded:${ok:- none}   (* = our build in place of Google's)"
+  [ -z "$bad" ] || { say "Not loaded:$bad (see dmesg)"; return 1; }
+}
+
+unload() {
+  [ -f "$ORDER" ] || return 0
+  # reverse load order: dependents first; parents go back to Google's copies
+  awk '{l[NR]=$0} END{for(i=NR;i>=1;i--) print l[i]}' "$ORDER" | while read -r f kind deps; do
+    loaded "$f" || continue
+    case "$kind" in
+      parent:*) exports "${kind#parent:}" || continue
+                rmmod "$(n_ "$f")" 2>>"$LOG" && gki "$(n_ "$f")" || say "$f is in use - left loaded" ;;
+      *)        rmmod "$(n_ "$f")" 2>>"$LOG" || say "$f is in use - left loaded" ;;
+    esac
+  done
+  say "NetHunter-kernel features unloaded until the next boot (to keep them off: nh-gki autoload off)"
+}
+
+status() {
+  if [ ! -f "$ORDER" ]; then echo "NetHunter-kernel features: not included in this build of the module"; return; fi
+  if ours_kernel; then echo "kernel: NetHunter build - extra features available"
+  else echo "kernel: not the NetHunter build (stock?) - extra features idle"; fi
+  n=0; l=0
+  while read -r f kind deps; do
+    n=$((n+1))
+    if loaded "$f"; then
+      l=$((l+1))
+      case "$kind" in
+        parent:*) exports "${kind#parent:}" && s="loaded (ours)" || s="loaded (Google's - trimmed)" ;;
+        *) s="loaded" ;;
+      esac
+    else s="-"; fi
+    printf '  %-16s %s\n' "$f" "$s"
+  done < "$ORDER"
+  echo "loaded $l of $n"
+  [ -f "$OFF" ] && echo "load on boot: off" || echo "load on boot: on"
+  [ -f "$MARK" ] && echo "load in progress or interrupted at: $(cat "$MARK")"
+  [ -f "$G/crashed-on" ] && echo "last boot load was interrupted at: $(cat "$G/crashed-on")"
+}
+
+case "$1" in
+  load) load ;;
+  unload) unload ;;
+  status) status ;;
+  autoload)
+    case "$2" in
+      on) rm -f "$OFF" "$MARK" "$G/crashed-on"; echo "load on boot: on" ;;
+      off) mkdir -p "$G"; touch "$OFF"; echo "load on boot: off" ;;
+      *) [ -f "$OFF" ] && echo "load on boot: off" || echo "load on boot: on" ;;
+    esac ;;
+  *) echo "usage: nh-gki load|unload|status|autoload [on|off]"; exit 1 ;;
+esac

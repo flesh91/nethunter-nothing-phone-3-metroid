@@ -26,6 +26,8 @@
 
 Ключова знахідка: `cfg80211`/`mac80211` на пристрої — Qualcomm, а не Google. Заголовки збігаються з ACK, але конфіг інший: `CONFIG_NL80211_TESTMODE=y` (інакше CRC `wiphy_new_nm`/`ieee80211_alloc_hw_nm` не збігаються і драйвери не вантажаться) і `CONFIG_MAC80211_RC_MINSTREL` **вимкнено** (у mac80211 Qualcomm немає rate control, тож USB-адаптери не стартують). Тому `minstrel_ht` зібрано окремим модулем і зроблено типовим при завантаженні. Джерело для звірки: [NothingOSS/android_kernel_msm-6.6_nothing_sm8735](https://github.com/NothingOSS/android_kernel_msm-6.6_nothing_sm8735), гілка `sm8735/b/mr`, `arch/arm64/configs/vendor/sun_perf.config`.
 
+**Необов'язковий варіант B — власне ядро NetHunter.** Те, чого модуль на стоковому ядрі дати не може (CAN ISO-TP/J1939, BNEP, USB RNDIS/QMI/MBIM, RNDIS-гаджет), дає власне boot-ядро: те саме ядро Google, зібране з того самого коміту ACK і стокового конфігу, з KMI, ідентичним збірці Google. Модуль лишається тим самим і сам вмикає ці функції, коли працює це ядро — див. [Варіант B](#варіант-b-власне-ядро-nethunter-необовязково).
+
 ---
 
 ## Стан функцій
@@ -68,15 +70,18 @@
 
 **Із зовнішнім адаптером:** працюйте на `wlan1` і не чіпайте `wlan0` — не запускайте `airmon-ng check kill`, він може вимкнути власний Wi-Fi телефона. Поки `airodump-ng` тримає канал, запускайте `aireplay-ng` з `--ignore-negative-one`, інакше він чекає бікона на «channel -1» і нічого не надсилає.
 
-### Неможливо на стоковому ядрі (❌)
+### Неможливо на стоковому ядрі (❌) — частину дає ядро NetHunter
 
-| Функція | Причина | Обхід |
-|---|---|---|
-| PostgreSQL для БД Metasploit (`CONFIG_SYSVIPC`) | вмикання змінює `task_struct` → ламає KMI і всі вендорські модулі | msfconsole без БД, або БД на іншій машині |
-| CAN ISO-TP / J1939 у ядрі | `can_proto_register` та ін. захищені в GKI `can.ko` | userspace `python-can-isotp` / `j1939` поверх `can_raw` |
-| BNEP (Bluetooth PAN) | `bt_sock_register` поза KMI | — |
-| USB-net `rndis_host`, `qmi_wwan`, `cdc_mbim`, `dm9601`, `mcs7830` | потрібні захищені символи GKI | працюють `r8152`/`asix`/`ax88179`/`cdc_ether`/`smsc95xx` |
-| `carl9170`, `zd1211rw`, `bpa10x` | рідкісне старе залізо, символи поза KMI | — |
+| Функція | Причина на стоковому ядрі | Обхід на стоку | З ядром NetHunter ([варіант B](#варіант-b-власне-ядро-nethunter-необовязково)) |
+|---|---|---|---|
+| PostgreSQL для БД Metasploit (`CONFIG_SYSVIPC`) | вмикання змінює `task_struct` → ламає KMI і всі вендорські модулі | msfconsole без БД, або БД на іншій машині | ❌ так само — ламає KMI |
+| CAN ISO-TP / J1939 у ядрі | `can_proto_register` та ін. захищені в GKI `can.ko` | userspace `python-can-isotp` / `j1939` поверх `can_raw` | ✅ перевірено наживо на `vcan0` |
+| BNEP (Bluetooth PAN) | `bt_sock_register` поза KMI | — | 🟡 вантажиться, із залізом не перевіряли |
+| USB-net `rndis_host`, `qmi_wwan`, `cdc_mbim`, `dm9601`, `mcs7830` | потрібні захищені символи GKI | працюють `r8152`/`asix`/`ax88179`/`cdc_ether`/`smsc95xx` | 🟡 вантажаться, із залізом не перевіряли |
+| RNDIS-гаджет (BadUSB-мережа) | не ввімкнено в стоковому конфігу | ECM-гаджет | 🟡 вбудовано в ядро, не перевіряли |
+| BT-адаптер `bpa10x`, NFC PN533 (USB), USB CAN Kvaser/EMS/ESD/UCAN | не ввімкнено в стоковому конфігу | — | 🟡 вантажаться, із залізом не перевіряли |
+| NFS клієнт і сервер | не ввімкнено в стоковому конфігу | — | ✅ `nfs`/`nfs4`/`nfsd` у ядрі (у Kali потрібні `nfs-common` / `nfs-kernel-server`) |
+| USB Wi-Fi `carl9170`, `zd1211rw`, `zd1201`, `rtl8192cu`, `ath6kl`, `rndis_wlan` | потребують `mac80211` — на цьому телефоні він від Qualcomm | — | не в ядрі: лише модулем (ще не додано) |
 
 ---
 
@@ -126,6 +131,54 @@ adb shell su -c "nh-wlan-driver status"   # очікувано: driver: injectio
 
 ---
 
+## Варіант B: власне ядро NetHunter (необов'язково)
+
+Власне boot-ядро — **те саме ядро Google GKI**, зібране з того самого коміту ACK (`f0987337fa35`) і зі стоковим конфігом, плюс усе з офіційного списку опцій ядра NetHunter, що можна додати без зміни KMI (модулями; звірку див. у [kernel-recipe](kernel-recipe/README.uk.md#звірка-з-офіційним-списком-nethunter-106-опцій)). `uname -r` стоковий, KMI ідентичний збірці Google (усі 9175 експортів, ті самі CRC), тож вендорні модулі Qualcomm і модулі Google з `system_dlkm` вантажаться як завжди. Перевірено наживо (без прошивки, через `fastboot boot`): Wi-Fi з injection, LTE на обох SIM, усі стокові модулі; ISO-TP і J1939 — функціонально. Як зібрано й перевірено: [kernel-recipe/README.uk.md](kernel-recipe/README.uk.md).
+
+**Лише для прошивки C5.0-260924-2115** (ядро `ab15756704`).
+
+| Додає | Стан |
+|---|---|
+| CAN ISO-TP / J1939, tc-фільтр за CAN-id | ✅ перевірено на `vcan0` |
+| NFS клієнт і сервер | ✅ у ядрі (монтування — з `nfs-common`/`nfs-kernel-server` у Kali) |
+| Діагностика netlink (`ss -A netlink`), `rmmod -f` | ✅ |
+| USB CAN-адаптери Kvaser / EMS / ESD / UCAN | 🟡 вантажаться |
+| Bluetooth PAN (BNEP), адаптер BPA10x | 🟡 вантажаться |
+| USB-net host RNDIS / QMI / MBIM / DM9601 / MCS7830 | 🟡 вантажаться |
+| NFC-зчитувачі PN533/PN532 (USB) | 🟡 вантажаться |
+| RNDIS-гаджет (BadUSB-мережа) | 🟡 вбудовано |
+
+**Спершу — без прошивки.** Ядро завантажується в пам'ять один раз; будь-яке перезавантаження повертає стокове:
+
+```bash
+adb reboot bootloader
+fastboot boot nethunter-boot.img
+```
+
+```bash
+adb shell su -c "nh-gki status"
+```
+
+Потрібен свіжий `fastboot` (Android SDK platform-tools); старий 31.x на macOS не бачить телефон у режимі fastboot.
+
+**Постійно** (ще не перевіряли — спершу варіант без прошивки). Прошийте в поточний слот; стоковий `boot.img` вашої прошивки тримайте поруч — ним і повертаєтесь:
+
+```bash
+fastboot getvar current-slot
+```
+
+```bash
+fastboot flash boot_b nethunter-boot.img
+```
+
+Повернути стокове: `fastboot flash boot_b boot.img` (слот — ваш поточний). Magisk живе в `init_boot` і лишається. Перед оновленням Nothing OS поверніть стоковий `boot.img`.
+
+**Модуль той самий** (v6+): на стоковому ядрі ці функції сплять, на ядрі NetHunter `nh-gki` вантажить їх після старту — разом із власними `can.ko`/`cdc_ncm.ko`/`nfc.ko` замість гуглівських (у тих вирізано експорти, потрібні J1939, MBIM і PN533; якщо наш не завантажиться — повертається гуглівський). Вимкнути: `nh-gki autoload off`.
+
+Ціна: у цьому ядрі вимкнено `CONFIG_MODULE_SIG_PROTECT` — інакше модулі Google з `system_dlkm`, підписані чужим для цього ядра ключем, втратили б доступ до захищених символів. Тож модулі Google вантажаться як «непідписані» (ядро позначається taint `E`), а GKI-захист символів не застосовується.
+
+---
+
 ## Команди-утиліти
 
 Усі в `/system/bin` після перезавантаження (до першого — повним шляхом).
@@ -135,6 +188,7 @@ adb shell su -c "nh-wlan-driver status"   # очікувано: driver: injectio
 | `nh-kmod load \| unload \| status \| autoload on\|off` | завантажити/вивантажити драйвери, показати стан |
 | `nh-wlan monitor [канал] \| managed \| channel N \| status` | monitor mode вбудованого Wi-Fi (типово канал 6 — **обов'язковий**, без каналу монітор мертвий) |
 | `nh-wlan-driver swap \| restore \| status \| autoswap on\|off` | підмінити драйвер вбудованого Wi-Fi на збірку з injection або повернути стоковий (підміняється автоматично при старті) |
+| `nh-gki load \| unload \| status \| autoload on\|off` | функції ядра NetHunter (варіант B): CAN ISO-TP/J1939 і USB CAN-адаптери, BT PAN, USB-net, NFC PN533, NFS; на стоковому ядрі нічого не робить |
 | `nh-bt start \| stop \| status \| install-bluebinder` | вбудований Bluetooth як `hci0` через AIDL-міст |
 | `nh-fix-nethunter boot \| cache \| commands \| su \| check` | фікси NetHunter нижче |
 
@@ -178,6 +232,7 @@ tools/build-all.sh 15756704 f0987337fa351d7e303b071df533fd4c1c194687
 ```
 module/nethunter-kmods/   Модуль Magisk/KernelSU: скрипти-утиліти (.ko/прошивки збираються, не комітяться)
 wlan-inject/              як зібрати цей драйвер: дельта апстріму, паритет зі стоковою збіркою, патчі injection, перевірки
+kernel-recipe/            варіант B: власне ядро NetHunter — збірка з коміту ACK, перевірка KMI проти Google, boot.img, тест на пристрої
 btbridge/nh-btbridge.c    Міст AIDL Bluetooth HAL ↔ /dev/vhci  (+ build.sh)
 patches/                  5 мінімальних патчів драйверів, по одному файлу, кожен пояснено
 config/                   фрагмент конфігу ядра: що додано і що неможливо та чому

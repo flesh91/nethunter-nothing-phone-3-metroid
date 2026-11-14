@@ -35,5 +35,9 @@ kmods_boot() {
 }
 kmods_boot
 
+# Додаткові функції власного ядра NetHunter (варіант B) — лише коли працює саме воно;
+# на стоковому ядрі нічого не робить (вимкнути: nh-gki autoload off)
+sh "$MODDIR/gki-boot.sh"
+
 # Драйвер вбудованого Wi-Fi з інжекцією (вимкнути: nh-wlan-driver autoswap off)
 sh "$MODDIR/wlan-boot.sh"

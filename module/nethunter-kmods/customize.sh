@@ -15,6 +15,17 @@ set_perm "$MODPATH/system/bin/nh-btbridge" 0 2000 0755
 set_perm "$MODPATH/system/bin/nh-wlan" 0 2000 0755
 set_perm "$MODPATH/system/bin/nh-fix-nethunter" 0 2000 0755
 set_perm "$MODPATH/system/bin/nh-wlan-driver" 0 2000 0755
+set_perm "$MODPATH/system/bin/nh-gki" 0 2000 0755
+
+# Додаткові функції власного ядра NetHunter (варіант B): активні лише на ньому, на стоковому — сплять
+if [ -f "$MODPATH/gki/kernel.version" ]; then
+  if [ "$(cat /proc/version)" = "$(cat "$MODPATH/gki/kernel.version")" ]; then
+    ui_print "- NetHunter kernel detected: its extra modules (CAN, BT PAN, USB-net, NFC, NFS...) load after boot"
+    ui_print "  (disable: su -c nh-gki autoload off)"
+  else
+    ui_print "- Stock kernel: NetHunter-kernel features stay idle (they need nethunter-boot.img)"
+  fi
+fi
 
 # Драйвер вбудованого Wi-Fi з інжекцією: підміняється автоматично після старту, але лише на тій самій
 # збірці прошивки (ядро, vendor, стоковий драйвер), на якій його перевірено. Інакше пропускається,

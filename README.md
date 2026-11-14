@@ -26,6 +26,8 @@ Compatibility is proven against real artifacts, not by trial and error:
 
 Key finding: `cfg80211`/`mac80211` on the device are Qualcomm's, not Google's. Their headers match ACK but the config differs — `CONFIG_NL80211_TESTMODE=y` (otherwise `wiphy_new_nm`/`ieee80211_alloc_hw_nm` CRCs mismatch and drivers refuse to load) and `CONFIG_MAC80211_RC_MINSTREL` is **off** (Qualcomm's mac80211 has no rate-control algorithm, so USB adapters won't start). `minstrel_ht` is therefore built as a standalone module and made the default at load time. Reference: [NothingOSS/android_kernel_msm-6.6_nothing_sm8735](https://github.com/NothingOSS/android_kernel_msm-6.6_nothing_sm8735), branch `sm8735/b/mr`, `arch/arm64/configs/vendor/sun_perf.config`.
 
+**Optional variant B — the NetHunter kernel.** What a module on the stock kernel cannot add (CAN ISO-TP/J1939, BNEP, USB RNDIS/QMI/MBIM, RNDIS gadget) comes from an own boot kernel: the same Google kernel, built from the same ACK commit and the stock config, with a KMI identical to Google's build. The module stays the same and turns these features on by itself when that kernel runs — see [Variant B](#variant-b-the-nethunter-kernel-optional).
+
 ---
 
 ## Feature status
@@ -68,15 +70,18 @@ Other external USB Wi-Fi adapters (every chipset below except AR9271), USB Bluet
 
 **With an external adapter:** work on `wlan1` and leave `wlan0` alone — skip `airmon-ng check kill`, it can take down the phone's own Wi-Fi. While `airodump-ng` holds the channel, run `aireplay-ng` with `--ignore-negative-one`; otherwise it waits for a beacon on "channel -1" and sends nothing.
 
-### Not possible on the stock kernel (❌)
+### Not possible on the stock kernel (❌) — partly covered by the NetHunter kernel
 
-| Feature | Reason | Workaround |
-|---|---|---|
-| PostgreSQL for the Metasploit DB (`CONFIG_SYSVIPC`) | enabling it changes `task_struct` → breaks the KMI and every vendor module | msfconsole without a DB, or DB on another host |
-| CAN ISO-TP / J1939 in-kernel | `can_proto_register` etc. are protected in GKI `can.ko` | userspace `python-can-isotp` / `j1939` over `can_raw` |
-| BNEP (Bluetooth PAN) | `bt_sock_register` outside the KMI | — |
-| USB-net `rndis_host`, `qmi_wwan`, `cdc_mbim`, `dm9601`, `mcs7830` | need protected GKI symbols | `r8152`/`asix`/`ax88179`/`cdc_ether`/`smsc95xx` work |
-| `carl9170`, `zd1211rw`, `bpa10x` | rare old hardware needing non-KMI symbols | — |
+| Feature | Reason on the stock kernel | Stock workaround | With the NetHunter kernel ([variant B](#variant-b-the-nethunter-kernel-optional)) |
+|---|---|---|---|
+| PostgreSQL for the Metasploit DB (`CONFIG_SYSVIPC`) | enabling it changes `task_struct` → breaks the KMI and every vendor module | msfconsole without a DB, or DB on another host | ❌ same — breaks the KMI |
+| CAN ISO-TP / J1939 in-kernel | `can_proto_register` etc. are protected in GKI `can.ko` | userspace `python-can-isotp` / `j1939` over `can_raw` | ✅ verified live on `vcan0` |
+| BNEP (Bluetooth PAN) | `bt_sock_register` outside the KMI | — | 🟡 loads, not exercised with hardware |
+| USB-net `rndis_host`, `qmi_wwan`, `cdc_mbim`, `dm9601`, `mcs7830` | need protected GKI symbols | `r8152`/`asix`/`ax88179`/`cdc_ether`/`smsc95xx` work | 🟡 load, not exercised with hardware |
+| RNDIS gadget (BadUSB networking) | not enabled in the stock config | ECM gadget | 🟡 built in, not exercised |
+| BT adapter `bpa10x`, NFC PN533 (USB), USB CAN Kvaser/EMS/ESD/UCAN | not enabled in the stock config | — | 🟡 load, not exercised with hardware |
+| NFS client and server | not enabled in the stock config | — | ✅ `nfs`/`nfs4`/`nfsd` in the kernel (Kali needs `nfs-common` / `nfs-kernel-server`) |
+| USB Wi-Fi `carl9170`, `zd1211rw`, `zd1201`, `rtl8192cu`, `ath6kl`, `rndis_wlan` | need `mac80211` — Qualcomm's on this phone | — | not in the kernel: module only (not added yet) |
 
 ---
 
@@ -126,6 +131,54 @@ Safety nets: a marker is written before each driver load and each Wi-Fi swap; if
 
 ---
 
+## Variant B: the NetHunter kernel (optional)
+
+An own boot kernel — **the same Google GKI kernel**, built from the same ACK commit (`f0987337fa35`) with the stock config, plus everything from the official NetHunter kernel-option list that can be added without changing the KMI (as modules; the comparison is in [kernel-recipe](kernel-recipe/README.uk.md#звірка-з-офіційним-списком-nethunter-106-опцій)). `uname -r` is the stock one and the KMI is identical to Google's build (all 9175 exports, same CRCs), so Qualcomm vendor modules and Google's `system_dlkm` modules load as usual. Verified live (without flashing, via `fastboot boot`): Wi-Fi with injection, LTE on both SIMs, every stock module; ISO-TP and J1939 functionally. How it is built and checked: [kernel-recipe/README.uk.md](kernel-recipe/README.uk.md).
+
+**Only for firmware C5.0-260924-2115** (kernel `ab15756704`).
+
+| Adds | State |
+|---|---|
+| CAN ISO-TP / J1939, tc filter on CAN ids | ✅ verified on `vcan0` |
+| NFS client and server | ✅ in the kernel (mounting needs `nfs-common`/`nfs-kernel-server` in Kali) |
+| Netlink socket diagnostics (`ss -A netlink`), `rmmod -f` | ✅ |
+| USB CAN adapters Kvaser / EMS / ESD / UCAN | 🟡 load |
+| Bluetooth PAN (BNEP), BPA10x adapter | 🟡 load |
+| USB-net host RNDIS / QMI / MBIM / DM9601 / MCS7830 | 🟡 load |
+| NFC readers PN533/PN532 (USB) | 🟡 load |
+| RNDIS gadget (BadUSB networking) | 🟡 built in |
+
+**First, without flashing.** The kernel boots from RAM once; any reboot brings the stock one back:
+
+```bash
+adb reboot bootloader
+fastboot boot nethunter-boot.img
+```
+
+```bash
+adb shell su -c "nh-gki status"
+```
+
+Needs a recent `fastboot` (Android SDK platform-tools); the old 31.x on macOS does not see the phone in fastboot mode.
+
+**Permanently** (not tested yet — try the RAM boot first). Flash to the current slot; keep your firmware's stock `boot.img` at hand to go back:
+
+```bash
+fastboot getvar current-slot
+```
+
+```bash
+fastboot flash boot_b nethunter-boot.img
+```
+
+Back to stock: `fastboot flash boot_b boot.img` (use your current slot). Magisk lives in `init_boot` and stays. Restore the stock `boot.img` before a Nothing OS update.
+
+**Same module** (v6+): on the stock kernel these features stay idle; on the NetHunter kernel `nh-gki` loads them after boot, together with our own `can.ko`/`cdc_ncm.ko`/`nfc.ko` in place of Google's (those have the exports J1939, MBIM and PN533 need trimmed away; if ours fails to load, Google's is put back). Disable: `nh-gki autoload off`.
+
+Trade-off: this kernel has `CONFIG_MODULE_SIG_PROTECT` off — otherwise Google's `system_dlkm` modules, signed with a key foreign to this kernel, would lose access to protected symbols. So Google's modules load as "unsigned" (the kernel gets taint `E`) and GKI symbol protection is not enforced.
+
+---
+
 ## Helper commands
 
 All are in `/system/bin` after a reboot (run by full path before the first reboot).
@@ -135,6 +188,7 @@ All are in `/system/bin` after a reboot (run by full path before the first reboo
 | `nh-kmod load \| unload \| status \| autoload on\|off` | load/unload the driver set, show state |
 | `nh-wlan monitor [chan] \| managed \| channel N \| status` | built-in Wi-Fi monitor mode (defaults to channel 6 — **required**, monitor is dead without a channel) |
 | `nh-wlan-driver swap \| restore \| status \| autoswap on\|off` | swap the built-in Wi-Fi driver for the injection build, or back to stock (swaps automatically on boot) |
+| `nh-gki load \| unload \| status \| autoload on\|off` | NetHunter-kernel features (variant B): CAN ISO-TP/J1939 and USB CAN adapters, BT PAN, USB-net, NFC PN533, NFS; does nothing on the stock kernel |
 | `nh-bt start \| stop \| status \| install-bluebinder` | built-in Bluetooth as `hci0` via the AIDL bridge |
 | `nh-fix-nethunter boot \| cache \| commands \| su \| check` | the NetHunter fixes below |
 
@@ -178,6 +232,7 @@ The built-in Wi-Fi driver is built separately (it needs Nothing's kernel source,
 ```
 module/nethunter-kmods/   Magisk/KernelSU module: helper scripts (the .ko/firmware are built, not committed)
 wlan-inject/              how the built-in Wi-Fi driver is built: upstream delta, stock-parity edits, injection patches, checks
+kernel-recipe/            variant B: the NetHunter kernel — build from the ACK commit, KMI check against Google, boot.img, on-device test
 btbridge/nh-btbridge.c    AIDL Bluetooth HAL ↔ /dev/vhci bridge  (+ build.sh)
 patches/                  5 minimal driver patches, one file each, each explained
 config/                   kernel config fragment: what is added, and what is impossible and why

@@ -1,0 +1,149 @@
+# Кастомне ядро NetHunter для Nothing Phone (3) — рецепт
+
+Мета: **другий варіант** поставки на стокову прошивку поряд із модулем `nethunter-kmods` —
+власне boot-ядро, що додає функції, недосяжні модулю на стоковому ядрі
+(через `CONFIG_MODULE_SIG_PROTECT`). Кінцева ціль — подати пристрій в офіційний NetHunter.
+
+## Два варіанти поставки
+
+- **A. Модуль на стоковому ядрі** — `nethunter-kmods` v1.3. Вже містить усе, що можливо без заміни ядра.
+- **B. Власне ядро + той самий модуль** — ядро додає фічі нижче; модуль лишається (USB-драйвери, прошивки, вбудований Wi-Fi monitor+injection, `nh-*`).
+
+## Що таке стокове ядро насправді
+
+Ядро в `boot.img` прошивки **C5.0-260924-2115** — це **чистий Google GKI**, а не збірка Nothing:
+
+```
+Linux version 6.6.127-android15-8-gf0987337fa35-ab15756704-4k (kleaf@build-host)
+  (Android clang 18.0.0, based on r510928) #1 SMP PREEMPT Tue Jun 30 2026
+```
+
+Google публікує артефакти цієї збірки на ci.android.com (build `15756704`, target `kernel_aarch64`):
+маніфест із точним комітом, `vmlinux.symvers` (CRC усіх 9175 експортів), `abi_symbollist.raw`.
+Тому збираємо **з того самого коміту ACK** і перевіряємо результат проти **еталонних CRC Google**.
+
+| Що | Значення |
+|---|---|
+| ACK `kernel/common` | `f0987337fa351d7e303b071df533fd4c1c194687` (гілка `android15-6.6-2026-04`, 29.06.2026) |
+| Конфіг | ikconfig зі стокового `fw/boot/boot.img` (7753 рядки) |
+| Рядок версії | `6.6.127-android15-8-gf0987337fa35-ab15756704-4k` — мусить збігатися **точно** |
+
+> Джерела Nothing (`NothingOSS/android_kernel_msm-6.6_nothing_sm8735`): гілка `sm8735/b/mr` — 6.6.127
+> (ACK `2026-04-r3`, NOS 4.1), `sm8735/v/mr` — 6.6.57 (стартовий NOS 3.5). Для boot-ядра вони
+> не потрібні: це GKI, а вендорні модулі лишаються стоковими. `b/mr` використовується для WLAN-драйвера.
+
+## Які фічі додає ядро
+
+Усе з офіційних сторінок «Configuring the Kernel» Kali NetHunter, чого бракує стоку і що можна додати,
+не змінюючи KMI — усе модулями (`=m`), тож vmlinux лишається ідентичним збірці Google.
+
+| Фіча | Конфіг | Перевірено |
+|---|---|---|
+| CAN ISO-TP / J1939 | `CAN_ISOTP`, `CAN_J1939` | ✅ передача на `vcan0` |
+| USB CAN-адаптери Kvaser / EMS / ESD / UCAN | `CAN_KVASER_USB`, `CAN_EMS_USB`, `CAN_ESD_USB`, `CAN_UCAN` | 🟡 вантажаться |
+| tc-фільтр за CAN-id | `NET_EMATCH_CANID` | ✅ `basic match canid(...)` |
+| Bluetooth PAN (BNEP), BPA10x | `BT_BNEP` (+ фільтри), `BT_HCIBPA10X` | 🟡 вантажаться |
+| USB-net RNDIS / QMI / MBIM / DM9601 / MCS7830 | `USB_NET_RNDIS_HOST/QMI_WWAN/CDC_MBIM/DM9601/MCS7830` (+ `USB_WDM`) | 🟡 вантажаться |
+| RNDIS-гаджет (BadUSB-мережа) | `USB_CONFIGFS_RNDIS=y` (+ `USB_F_RNDIS=y`) | 🟡 вбудовано |
+| NFC-зчитувачі PN533/PN532 (USB) | `NFC_PN533_USB` | 🟡 вантажаться |
+| NFS клієнт і сервер | `NFS_FS` (`V2/V3/V4`), `NFSD` (`V4`) → sunrpc, lockd, grace, rpcsec_gss_krb5, dns_resolver | ✅ `nfs`/`nfs4`/`nfsd` у `/proc/filesystems` (монтування — ще ні) |
+| Діагностика netlink-сокетів | `NETLINK_DIAG` | ✅ `ss -a -A netlink` |
+| Примусове вивантаження модулів | `MODULE_FORCE_UNLOAD=y` | ✅ у конфігу запущеного ядра |
+
+Фрагмент — [`nethunter.config`](nethunter.config). Вбудована Wi-Fi-інжекція лишається в модулі.
+
+### Звірка з офіційним списком NetHunter (106 опцій)
+
+Зібрано зі сторінок kali.org/docs/nethunter/nethunter-kernel-*-config-* (General, Network/BT, Wi-Fi, SDR, USB, NFS, CAN):
+- **вже є у стоку**: CAN core/raw/bcm/gw/dev/slcan/vcan, cdc-acm, rtl8150/8152, ftdi_sio, hci_uart, binder, devlink, vsock;
+- **дає модуль `nethunter-kmods`**: USB Wi-Fi (Ralink rt2800/rt73/rt2500, ath9k_htc, mt7601u/mt76, rtl8187, rtl8xxxu, 88xxau), USB-BT (btusb, bfusb, bcm203x, ath3k, hci_vhci), CAN gs_usb/peak_usb/usb_8dev, ch341;
+- **додано в ядро** — таблиця вище;
+- **лише модулем, ще не додано**: carl9170, zd1211rw, zd1201, rtl8192cu, ath6kl, rndis_wlan — на цьому телефоні `cfg80211`/`mac80211` вендорські (Qualcomm), тож USB Wi-Fi живе в модулі, не в ядрі;
+- **неможливо**: `SYSVIPC` (змінює `task_struct` → ламає KMI);
+- **свідомо ні**: DVB/SDR-драйвери ядра (userspace librtlsdr/hackrf/airspy уже працює, а драйвер ядра забирав би донгли), CAN-контролери SoC/SPI/PCI (такого заліза в телефоні немає), HLCAN (поза деревом ядра), `USB_SERIAL_CONSOLE`/`GENERIC` (потребують перезбірки гуглівського usbserial), формати образу й `LOCALVERSION` (до GKI не застосовні).
+
+### Чому вимкнено `CONFIG_MODULE_SIG_PROTECT`
+
+Наше ядро має власний ключ підпису. Модулі Google у `system_dlkm` для нього — «ключ недоступний»
+(`-ENOKEY`), тобто непідписані. З увімкненим `SIG_PROTECT` вони втратили б доступ до GKI-захищених
+символів, і Bluetooth / CAN / usbnet / zram не завантажились би. Без нього вони вантажаться
+(ядро позначається taint `E`). Перевірено в коді ACK: `kernel/module/signing.c`; lockdown-LSM у цьому
+конфігу не зібраний, тож інших перешкод для непідписаних модулів немає; `gki_module.c` нічого
+не експортує, тож KMI це не змінює. Ціна — ядро не застосовує GKI-захист символів (для NetHunter прийнятно).
+
+## Збірка
+
+```bash
+# 1. еталонні артефакти й стоковий конфіг (у kernel/ — gitignored)
+mkdir -p kernel/ref-ab15756704 && cd kernel/ref-ab15756704
+for f in manifest_15756704.xml vmlinux.symvers abi_symbollist.raw System.map; do
+  curl -sLO "https://ci.android.com/builds/submitted/15756704/kernel_aarch64/latest/raw/$f"; done
+#    stock.config — scripts/extract-ikconfig із ядра в fw/boot/boot.img (blob з offset 4096)
+cd ../..
+
+# 2. точний коміт ACK у регістрозалежний Docker-том (на APFS ламаються xt_DSCP.c/xt_dscp.c)
+docker volume create nh-gki-src
+docker run --rm -v nh-gki-src:/src nh-kbuild bash -c 'cd /src && git init -q . &&
+  git fetch --depth 1 https://android.googlesource.com/kernel/common f0987337fa351d7e303b071df533fd4c1c194687 &&
+  git checkout -q FETCH_HEAD'
+
+# 3. конфіг → збірка → перевірка KMI
+docker run --rm -v nh-gki-src:/src -v nh-gki-out:/out \
+  -v "$PWD/kernel-recipe":/r:ro -v "$PWD/kernel/ref-ab15756704":/ref:ro \
+  nh-kbuild bash /r/build-gki.sh all
+```
+
+[`build-gki.sh`](build-gki.sh) стадіями:
+- **config** — стоковий конфіг + фрагмент + `SIG_PROTECT` off; друкує **кожну** відмінність від стоку
+  (зараз 42: опції фрагмента, їхні підопції й автозалежності — sunrpc/lockd/grace/`NET_HANDSHAKE`…, `SIG_PROTECT`)
+  і звіряє рядок версії. Рядок відтворено як у Kleaf: файл `localversion` в O= + `GIT_DIR` вимкнено
+  для `make` (тоді `scripts/setlocalversion` не додає `-g<sha>`/`-dirty`).
+- **build** — `Image` + модулі (нативний arm64, clang 18.1.3; стоковий r510928 — те саме покоління LLVM 18).
+- **check** — [`kmi-check.py`](kmi-check.py): кожен із 9175 стокових експортів мусить мати **той самий CRC**.
+
+Середовище: образ `nh-kbuild` (Ubuntu 24.04 arm64, clang/lld 18, `pahole` 1.25 = стоковий `PAHOLE_VERSION=125`).
+
+## Статус
+
+- [x] Стокове ядро ідентифіковано (Google GKI ab15756704), еталонні артефакти Google отримано.
+- [x] Точний коміт ACK склоновано; конфіг = сток + 12 очікуваних змін; рядок версії збігається.
+- [x] Збірка (10 хв, нативний arm64) + **KMI IDENTICAL**: усі 9175 стокових експортів, ті самі CRC, 0 розбіжностей
+      (+3 зайві експорти для нових USB-net/BNEP модулів — стоку не заважають).
+- [x] 62 модулі `nethunter-kmods`: 2712 імпортів звірено з нашою збіркою, 0 розбіжностей CRC.
+- [x] `boot.img` ([`make-bootimg.sh`](make-bootimg.sh)): стоковий заголовок v4 + наш `Image`, AVB-футер зі стоковими
+      параметрами (rollback index, props), тестовий ключ AOSP. Результат: `kernel/out-gki/nethunter-boot.img`.
+- [x] **Тест наживо без запису** (`fastboot boot`, 14.11.2026) — бутлоадер Nothing це підтримує (потрібен свіжий
+      `fastboot` із SDK platform-tools; старий 31.x на macOS пристрою не бачить). Результат на нашому ядрі:
+      завантажено ті самі модулі, що й на стоку (575 vs 576 — різниця лише тимчасова, на момент підміни WLAN-драйвера);
+      Wi-Fi (наш injection-драйвер через `nethunter-kmods`) і LTE на обох SIM працюють; Google-модулі з `system_dlkm`
+      вантажаться з taint `E` як очікувалось; **ISO-TP і J1939 функціонально перевірено на `vcan0`** (Python `AF_CAN`).
+- [x] Пакування варіанта B (модуль v5): `tools/add-gki-extras.sh` кладе в `module/nethunter-kmods/gki/` 7 нових `.ko`,
+      наші `can.ko`/`can-raw.ko`/`cdc_ncm.ko` і `kernel.version` (точний `/proc/version` збірки — за ним модуль упізнає
+      це ядро, бо `uname -r` стоковий). `gki-boot.sh` + `nh-gki` вантажать їх після старту лише на цьому ядрі, з відкатом
+      на гуглівський батьківський модуль і маркером від циклу. Перевірено наживо: unload/load, гард стокового ядра
+      (нічого не чіпає), запобіжник обірваного завантаження.
+- [x] **Цикл перезавантажень із встановленим модулем v5** (14.11.2026):
+      стокове ядро — `nh-kmod` 62/0, Wi-Fi injection «Swap OK», `gki`: «Stock kernel … stay idle», гуглівський `cdc_ncm`
+      не зачеплено, LTE; ядро NetHunter (`fastboot boot`) — `gki-boot.sh` **сам** завантажив усі 7 функцій із нашими
+      `can`/`cdc_ncm`, 584 модулі (= 576 стокових + 8), **0 відсутніх**, Wi-Fi injection, LTE на обох SIM.
+      Рядки dmesg `sram -16`, `cpuss-sleep-stats -22`, `regulatory.db` є й на свіжому старті стоку — не від ядра.
+- [x] **Розширений набір за офіційним списком NetHunter (модуль v6)**: 29 нових модулів + наші `can`/`cdc_ncm`/`nfc`.
+      Пакування тепер виводиться зі збірки, без ручних списків: [`gki-deps-check.py`](gki-deps-check.py) статично
+      розв'язує імпорти кожного нового модуля проти **справжніх** гуглівських `.ko` з телефона (`adb pull
+      /system_dlkm/lib/modules/`) і знаходить урізані батьківські (так знайдено `nfc.ko` для PN533 — ще до тесту);
+      [`gki-stage.py`](gki-stage.py) пише `gki/load.order` (порядок за `depends` з `.modinfo`); `nh-gki` виконує його,
+      утримувачів батьківського модуля визначає з `/sys/module/<m>/holders`. Наживо (`fastboot boot`): **32 з 32**
+      піднялись самі при старті, 605 модулів, 0 стокових відсутні, Wi-Fi injection, LTE; функціонально — ISO-TP, J1939,
+      `em_canid`, `netlink_diag`, файлові системи NFS.
+- [ ] Наживо з залізом: RNDIS/QMI/MBIM/DM9601/MCS7830 (USB-модем/Ethernet), BNEP (BT PAN), BPA10x, Kvaser/EMS/ESD/UCAN,
+      PN533, RNDIS-гаджет; NFS — монтування (потрібні `nfs-common`/`nfs-kernel-server` у Kali).
+- [ ] Постійна прошивка `boot` (тестували лише `fastboot boot`).
+- [ ] Апстрім у NetHunter.
+
+### Знахідка тесту: обрізані експорти в модулях Google
+
+`can_j1939` і `cdc_mbim` спершу не вантажились: `Unknown symbol can_sock_destruct` / `cdc_ncm_bind_common`, …
+Google збирає свої `can.ko` і `cdc_ncm.ko` з `TRIM_UNUSED_KSYMS`; у стоку j1939 і mbim немає, тож ці експорти вирізано.
+KMI-перевірка vmlinux цього не бачить — це експорти **між модулями**. Рішення: возити наші `can.ko` (+`can-raw.ko`) і
+`cdc_ncm.ko` з цієї ж збірки (у ній експорти збережені) і вантажити їх замість гуглівських. Гуглівський `cdc_ncm`
+вантажиться при старті, але не використовується (refcount 0) — `rmmod` проходить; перевірено наживо.

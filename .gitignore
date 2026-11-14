@@ -43,3 +43,6 @@ Module.symvers
 # --- Службове ---
 .DS_Store
 *.swp
+kernel/
+# --- Власне ядро NetHunter (варіант B): .ko цієї збірки і kernel.version — артефакти tools/add-gki-extras.sh ---
+/module/nethunter-kmods/gki/
