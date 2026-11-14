@@ -128,8 +128,6 @@ adb shell su -c "nh-wlan monitor 9"       # monitor mode: wlan0 (receive + injec
 
 It is bound to this exact firmware build (kernel, vendor build and stock driver are checked) and does nothing after a Nothing OS update until the driver is rebuilt. Test results, limits and safety nets: [wlan-inject/README.md](wlan-inject/README.md).
 
-> With the `nethunter-kmods` zip from the v1.0 release, `nh-wlan monitor` still prints `receive only, no injection`. That text is outdated — it is fixed in this tree and ships with the next `nethunter-kmods` build. `nh-wlan-driver status` shows which driver is really loaded.
-
 ---
 
 ## Helper commands

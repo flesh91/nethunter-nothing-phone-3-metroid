@@ -128,8 +128,6 @@ adb shell su -c "nh-wlan monitor 9"       # monitor mode: wlan0 (receive + injec
 
 Модуль прив'язаний саме до цієї збірки прошивки (перевіряються ядро, збірка vendor і стоковий драйвер) і після оновлення Nothing OS нічого не робить, доки драйвер не перезберуть. Результати тестів, обмеження і запобіжники: [wlan-inject/README.uk.md](wlan-inject/README.uk.md).
 
-> Із zip `nethunter-kmods` з релізу v1.0 команда `nh-wlan monitor` досі друкує `receive only, no injection`. Цей текст застарів — у цьому дереві його виправлено, і він вийде з наступною збіркою `nethunter-kmods`. Який драйвер завантажено насправді, показує `nh-wlan-driver status`.
-
 ---
 
 ## Команди-утиліти
