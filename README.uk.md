@@ -39,7 +39,7 @@
 | 62 драйвери вантажаться у стокове ядро | ✅ | `loaded=62 failed=0`, без помилок ядра, автозавантаження при старті |
 | Вбудований Bluetooth як Linux `hci0` (`nh-bt` + `nh-btbridge`) | ✅ | класичне сканування + LE; працює під SELinux Enforcing |
 | **Monitor mode** вбудованого Wi-Fi (`nh-wlan`) | ✅ | захоплення на 2.4/5 ГГц, перемикання каналів; зі стоковим драйвером лише приймання |
-| **Packet injection** на вбудованому Wi-Fi (необов'язковий модуль `nethunter-wlan-inject`) | ✅ | перезібраний драйвер Wi-Fi, **ядро так само стокове**: `aireplay-ng --test` 30/30 на 2.4 і 5 ГГц, рівне приймання в моніторі — див. [wlan-inject](wlan-inject/README.uk.md) |
+| **Packet injection** на вбудованому Wi-Fi (необов'язковий модуль `nethunter-wlan-inject`) | ✅ | перезібраний драйвер Wi-Fi, **ядро так само стокове**: `aireplay-ng --test` 30/30 на 2.4 і 5 ГГц, deauth і захоплення WPA2 handshake на 5 ГГц, рівне приймання в моніторі — див. [wlan-inject](wlan-inject/README.uk.md) |
 | Зовнішній USB Wi-Fi: Atheros AR9271 (перевірено на TP-Link TL-WN722N **v1**) | ✅ | `ath9k_htc` вантажиться при підключенні, прошивка `htc_9271` підхоплюється, з'являється `wlan1`; monitor mode, `aireplay-ng --test` 30/30 на моїй точці; deauth і повний WPA2 4-way handshake захоплено на власній мережі |
 | USB Arsenal: HID клавіатура+миша, mass storage, ACM, ECM | ✅ | USB-функції визначаються хостом (гаджет зі стокового ядра) |
 | Фікс 32-бітного busybox NetHunter (`nh-fix-nethunter`) | ✅ | 64-бітному пристрою потрібен 64-бітний busybox; застосовується щозавантаження |

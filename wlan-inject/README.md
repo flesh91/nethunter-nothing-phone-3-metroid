@@ -20,9 +20,13 @@ All tests were run against my own access point, one band at a time.
 | `aireplay-ng --test`, 2.4 GHz (ch 9) | fails (0 APs answer) | **30/30** |
 | `aireplay-ng --test`, 5 GHz (ch 36) | not measured | **30/30** |
 | Injection completions (`injection_stats`) | — | 369 submitted, 369 completed, 0 failed, 0 timed out |
+| Deauth against a client, 5 GHz (`aireplay-ng --deauth 8 -a <AP> -c <client>`) | — | **works**: frames ACKed by both the client and the AP, client dropped and reconnected |
+| WPA2 handshake capture, 5 GHz (airodump-ng + that deauth) | — | **captured**: `aircrack-ng` reports "1 handshake", 4 EAPOL frames |
+| Monitor on DFS channels (e.g. ch 52, "no IR") | — | tunes and receives |
+| Monitor on 6 GHz (5955–6415 MHz) | — | tunes without errors |
 | Survives reboot (swap on boot) | — | ✅ |
 
-Only the probe-request/response exchange of `aireplay-ng --test` has been exercised so far. The driver now accepts management, control and data frames for transmission, but deauthentication, handshake capture and WPS have **not** been tested yet. 6 GHz, DFS channels and bandwidths above 20 MHz are untested.
+**Not tested yet:** deauth and handshake capture on 2.4 GHz (no client was on that AP), WPS (disabled on my router — its beacons carry no WPS element), transmitting on 6 GHz and on DFS channels (no AP of mine on those frequencies; the 6 GHz test above only shows that the radio tunes, there was nothing to receive), bandwidths above 20 MHz.
 
 **Still not there:** monitor mode and a normal connection at the same time. Android Wi-Fi is turned off while monitoring (`nh-wlan` saves and restores it). The upstream work this is based on has follow-up commits for STA/AP + monitor coexistence; they do not apply cleanly to the Nothing tree and are not ported.
 

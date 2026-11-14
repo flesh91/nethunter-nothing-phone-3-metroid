@@ -39,7 +39,7 @@ Legend: ✅ verified live on the device · 🟡 built & loads, not exercised wit
 | 62 driver modules load into the stock kernel | ✅ | `loaded=62 failed=0`, no kernel errors, autoloads on boot |
 | Built-in Bluetooth as Linux `hci0` (`nh-bt` + `nh-btbridge`) | ✅ | classic inquiry + LE scan; works under SELinux Enforcing |
 | Built-in Wi-Fi **monitor mode** (`nh-wlan`) | ✅ | capture on 2.4/5 GHz, channel switching; receive-only with the stock driver |
-| Built-in Wi-Fi **packet injection** (optional `nethunter-wlan-inject` module) | ✅ | the Wi-Fi driver rebuilt, **still no custom kernel**: `aireplay-ng --test` 30/30 on 2.4 and 5 GHz, steady monitor RX — see [wlan-inject](wlan-inject/README.md) |
+| Built-in Wi-Fi **packet injection** (optional `nethunter-wlan-inject` module) | ✅ | the Wi-Fi driver rebuilt, **still no custom kernel**: `aireplay-ng --test` 30/30 on 2.4 and 5 GHz, deauth + WPA2 handshake capture on 5 GHz, steady monitor RX — see [wlan-inject](wlan-inject/README.md) |
 | External USB Wi-Fi: Atheros AR9271 (tested with TP-Link TL-WN722N **v1**) | ✅ | `ath9k_htc` loads on plug-in, `htc_9271` firmware loads, `wlan1` appears; monitor mode, `aireplay-ng --test` 30/30 on my AP; deauth + full WPA2 4-way handshake captured on my own network |
 | USB Arsenal: HID keyboard+mouse, mass storage, ACM, ECM | ✅ | gadget functions enumerate on a host PC (stock-kernel gadget) |
 | NetHunter 32-bit busybox fix (`nh-fix-nethunter`) | ✅ | 64-bit device needs a 64-bit busybox; applied every boot |
