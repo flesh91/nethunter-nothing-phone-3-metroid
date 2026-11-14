@@ -14,6 +14,27 @@ set_perm "$MODPATH/system/bin/nh-bt" 0 2000 0755
 set_perm "$MODPATH/system/bin/nh-btbridge" 0 2000 0755
 set_perm "$MODPATH/system/bin/nh-wlan" 0 2000 0755
 set_perm "$MODPATH/system/bin/nh-fix-nethunter" 0 2000 0755
+set_perm "$MODPATH/system/bin/nh-wlan-driver" 0 2000 0755
+
+# Драйвер вбудованого Wi-Fi з інжекцією: підміняється автоматично після старту, але лише на тій самій
+# збірці прошивки (ядро, vendor, стоковий драйвер), на якій його перевірено. Інакше пропускається,
+# а решта модуля працює як завжди.
+if [ -f "$MODPATH/wlan/qca_cld3_wcn7750.ko" ]; then
+  if [ "$(getprop ro.vendor.build.fingerprint)" = "$(cat "$MODPATH/wlan/vendor.fingerprint")" ] && \
+     [ "$(sha256sum /vendor_dlkm/lib/modules/qca_cld3_wcn7750.ko | cut -d' ' -f1)" = "$(cat "$MODPATH/wlan/stock.sha256")" ]; then
+    ui_print "- Built-in Wi-Fi injection: on, the driver is swapped ~15 s after boot"
+    ui_print "  (disable: su -c nh-wlan-driver autoswap off)"
+  else
+    ui_print "- Built-in Wi-Fi injection: skipped, this firmware differs from the tested one"
+  fi
+fi
+
+# Колишній окремий модуль інжекції тепер входить сюди — прибираємо його, щоб не було двох підмін
+for d in /data/adb/modules/nethunter-wlan-inject /data/adb/modules_update/nethunter-wlan-inject; do
+  [ -d "$d" ] || continue
+  touch "$d/remove"
+  ui_print "- Old nethunter-wlan-inject module will be removed on reboot (now part of this module)"
+done
 
 # Custom Commands NetHunter: «Start/Stop wlan0 monitor mode» → nh-wlan (якщо NetHunter уже встановлено)
 ui_print "- Checking NetHunter custom commands (wlan0 monitor mode)"

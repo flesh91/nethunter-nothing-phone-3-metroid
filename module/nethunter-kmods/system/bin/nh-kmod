@@ -44,10 +44,6 @@ case "$1" in
     done < "$MODDIR/modules.order"
     rm -f "$MODDIR/loading"; sync
     echo "loaded=$ok failed=$fail"
-    if [ ! -f "$MODDIR/autoload" ]; then
-      touch "$MODDIR/autoload"
-      echo "Autoload on boot enabled (disable: nh-kmod autoload off)"
-    fi
     [ "$fail" -gt 0 ] && dmesg | grep -iE 'protected|disagrees|Unknown symbol|exports' | tail -20
     ;;
   unload)
@@ -59,12 +55,12 @@ case "$1" in
       n=$(modname "$f"); [ -d "/sys/module/$n" ] && echo "[+] $n" || echo "[ ] $n"
     done < "$MODDIR/modules.order"
     echo "firmware path: $(cat $FWPARAM 2>/dev/null)"
-    [ -f "$MODDIR/autoload" ] && echo "autoload: on" || echo "autoload: off" ;;
+    [ -f "$MODDIR/autoload-off" ] && echo "autoload: off" || echo "autoload: on" ;;
   autoload)
     case "$2" in
-      on) rm -f "$MODDIR/loading" "$MODDIR/crashed-on"; touch "$MODDIR/autoload"; echo "autoload: on" ;;
-      off) rm -f "$MODDIR/autoload"; echo "autoload: off" ;;
-      *) [ -f "$MODDIR/autoload" ] && echo "autoload: on" || echo "autoload: off" ;;
+      on) rm -f "$MODDIR/loading" "$MODDIR/crashed-on" "$MODDIR/autoload-off"; echo "autoload: on" ;;
+      off) touch "$MODDIR/autoload-off"; echo "autoload: off" ;;
+      *) [ -f "$MODDIR/autoload-off" ] && echo "autoload: off" || echo "autoload: on" ;;
     esac ;;
   *) echo "usage: nh-kmod load|unload|status|autoload [on|off]"; exit 1 ;;
 esac

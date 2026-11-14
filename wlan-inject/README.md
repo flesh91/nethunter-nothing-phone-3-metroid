@@ -2,7 +2,7 @@
 
 *[Українською →](README.uk.md)*
 
-The Nothing Phone (3) has a Qualcomm **WCN7750** (FullMAC, `qca_cld3_wcn7750.ko`, qcacld-3.0). On the stock driver, monitor mode (`con_mode=4`) receives in bursts and cannot transmit. This directory rebuilds **only that one driver module** with working monitor mode and frame injection, and the `nethunter-wlan-inject` Magisk module swaps it in after boot.
+The Nothing Phone (3) has a Qualcomm **WCN7750** (FullMAC, `qca_cld3_wcn7750.ko`, qcacld-3.0). On the stock driver, monitor mode (`con_mode=4`) receives in bursts and cannot transmit. This directory rebuilds **only that one driver module** with working monitor mode and frame injection; the `nethunter-kmods` Magisk module ships it and swaps it in automatically after boot (`nh-wlan-driver`).
 
 **No custom kernel.** The stock Google GKI `Image`, `boot`/`init_boot` (apart from root) and every other vendor module stay untouched. The stock driver file in `vendor_dlkm` is not modified either: the swap happens in memory and is gone after a reboot.
 
@@ -95,7 +95,7 @@ adb shell su -c 'sh /data/local/tmp/swap-test.sh test /data/local/tmp/qca_cld3_w
 adb shell su -c 'sh /data/local/tmp/inject-test.sh <channel> <your AP bssid> <your AP essid>'
 
 # 6. package the Magisk module, bound to the firmware of the connected phone
-tools/pack-wlan-inject.sh wlan-inject/qca_cld3_wcn7750.inject.ko v2     # -> out/nethunter-wlan-inject-metroid-ab<build>-v2.zip
+tools/add-wlan-inject.sh wlan-inject/qca_cld3_wcn7750.inject.ko          # stages it into module/nethunter-kmods/wlan/, then tools/build-all.sh makes one zip
 ```
 
 What was actually run: steps 3–6 as written; `prepare-tree.sh` was checked to reproduce, file for file, the source tree the released driver was built from. `kernel-prep.sh` is the kernel-preparation part of the longer script that produced the build output used here — it has not been re-run in this trimmed form.

@@ -2,7 +2,7 @@
 
 *[English →](README.md)*
 
-У Nothing Phone (3) стоїть Qualcomm **WCN7750** (FullMAC, `qca_cld3_wcn7750.ko`, qcacld-3.0). Зі стоковим драйвером режим монітора (`con_mode=4`) приймає кадри сплесками і не вміє передавати. У цій теці — як перезібрати **лише цей один модуль драйвера** з робочим монітором та інжекцією кадрів; Magisk-модуль `nethunter-wlan-inject` підміняє ним стоковий після старту.
+У Nothing Phone (3) стоїть Qualcomm **WCN7750** (FullMAC, `qca_cld3_wcn7750.ko`, qcacld-3.0). Зі стоковим драйвером режим монітора (`con_mode=4`) приймає кадри сплесками і не вміє передавати. У цій теці — як перезібрати **лише цей один модуль драйвера** з робочим монітором та інжекцією кадрів; Magisk-модуль `nethunter-kmods` містить його і підміняє ним стоковий автоматично після старту (`nh-wlan-driver`).
 
 **Кастомне ядро не потрібне.** Стоковий Google GKI `Image`, `boot`/`init_boot` (окрім root) і всі інші вендор-модулі лишаються як є. Файл стокового драйвера у `vendor_dlkm` теж не змінюється: підміна відбувається в пам'яті й зникає після перезавантаження.
 
@@ -95,7 +95,7 @@ adb shell su -c 'sh /data/local/tmp/swap-test.sh test /data/local/tmp/qca_cld3_w
 adb shell su -c 'sh /data/local/tmp/inject-test.sh <канал> <bssid вашої точки> <essid вашої точки>'
 
 # 6. пакування Magisk-модуля з прив'язкою до прошивки підключеного телефона
-tools/pack-wlan-inject.sh wlan-inject/qca_cld3_wcn7750.inject.ko v2     # -> out/nethunter-wlan-inject-metroid-ab<збірка>-v2.zip
+tools/add-wlan-inject.sh wlan-inject/qca_cld3_wcn7750.inject.ko          # кладе у module/nethunter-kmods/wlan/, далі tools/build-all.sh робить один zip
 ```
 
 Що реально запускалось: кроки 3–6 як написано; для `prepare-tree.sh` перевірено, що він файл у файл відтворює дерево джерел, з якого зібрано випущений драйвер. `kernel-prep.sh` — це частина довшого скрипта, яка готувала ядро для цієї збірки; у такому обрізаному вигляді повторно не запускався.

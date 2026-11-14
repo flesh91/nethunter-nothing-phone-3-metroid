@@ -39,7 +39,7 @@
 | 62 драйвери вантажаться у стокове ядро | ✅ | `loaded=62 failed=0`, без помилок ядра, автозавантаження при старті |
 | Вбудований Bluetooth як Linux `hci0` (`nh-bt` + `nh-btbridge`) | ✅ | класичне сканування + LE; працює під SELinux Enforcing |
 | **Monitor mode** вбудованого Wi-Fi (`nh-wlan`) | ✅ | захоплення на 2.4/5 ГГц, перемикання каналів; зі стоковим драйвером лише приймання |
-| **Packet injection** на вбудованому Wi-Fi (необов'язковий модуль `nethunter-wlan-inject`) | ✅ | перезібраний драйвер Wi-Fi, **ядро так само стокове**: `aireplay-ng --test` 30/30 на 2.4 і 5 ГГц, deauth і захоплення WPA2 handshake на 5 ГГц, рівне приймання в моніторі — див. [wlan-inject](wlan-inject/README.uk.md) |
+| **Packet injection** на вбудованому Wi-Fi (`nh-wlan-driver`) | ✅ | перезібраний драйвер Wi-Fi, що підміняється автоматично після старту, **ядро так само стокове**: `aireplay-ng --test` 30/30 на 2.4 і 5 ГГц, deauth і захоплення WPA2 handshake на 5 ГГц, рівне приймання в моніторі — див. [wlan-inject](wlan-inject/README.uk.md) |
 | Зовнішній USB Wi-Fi: Atheros AR9271 (перевірено на TP-Link TL-WN722N **v1**) | ✅ | `ath9k_htc` вантажиться при підключенні, прошивка `htc_9271` підхоплюється, з'являється `wlan1`; monitor mode, `aireplay-ng --test` 30/30 на моїй точці; deauth і повний WPA2 4-way handshake захоплено на власній мережі |
 | USB Arsenal: HID клавіатура+миша, mass storage, ACM, ECM | ✅ | USB-функції визначаються хостом (гаджет зі стокового ядра) |
 | Фікс 32-бітного busybox NetHunter (`nh-fix-nethunter`) | ✅ | 64-бітному пристрою потрібен 64-бітний busybox; застосовується щозавантаження |
@@ -110,26 +110,19 @@ fastboot reboot
 
 **3 — Прошити модуль.** Залийте zip, далі Magisk → *Modules → Install from storage* → zip → *Reboot*.
 
-Перше завантаження **ручне** (автозавантаження вмикається лише після одного успішного, тож поганий модуль не спричинить цикл):
+Після перезавантаження все вантажиться автоматично: модулі ядра і драйвер інжекції вбудованого Wi-Fi (приблизно через 15 с). Перевірити:
 
 ```bash
-adb shell su -c "nh-kmod load"     # очікувано: loaded=62 failed=0, rate control: minstrel_ht
-adb shell su -c "nh-kmod status"
+adb shell su -c "nh-kmod status"          # очікувано: усі модулі [+], autoload: on
+adb shell su -c "nh-wlan-driver status"   # очікувано: driver: injection build (monitor + injection), swap on boot: on
 ```
 
-Перед кожним `insmod` пишеться маркер; якщо телефон перезавантажився посеред завантаження, на наступному старті модулі не вантажаться, автозавантаження вимикається, а `load.log` називає винуватця. Аварійний вихід, якщо все ж не стартує: прошити стоковий `init_boot.img`.
+Запобіжники: перед кожним завантаженням драйверів і кожною підміною Wi-Fi пишеться маркер; якщо телефон перезавантажився посередині, наступний старт це пропускає (`autoload: off` / `swap on boot: off`) і лишає стоковий стан, тож погана збірка не спричинить цикл. Увімкнути знову: `nh-kmod autoload on` / `nh-wlan-driver autoswap on`. Аварійний вихід: безпечний режим Magisk (затиснути «гучність вниз» під час завантаження) або прошити стоковий `init_boot.img`.
 
 **4 — Kali NetHunter.** Встановіть **NetHunter Generic ARM64 (Full)** для Magisk з [kali.org](https://www.kali.org/get-kali/#kali-mobile) (окремого образу під Phone (3) немає, generic правильний), перезавантажте, налаштуйте Kali chroot у застосунку. Фікси NetHunter нижче застосовуються автоматично при встановленні/завантаженні модуля.
 
 
-**5 — Injection на вбудованому Wi-Fi (необов'язково).** Так само прошийте другий модуль, `nethunter-wlan-inject-metroid-ab15756704-v2.zip` з [Releases](../../releases), і перезавантажте. Він підміняє стоковий драйвер Wi-Fi **у пам'яті** на перезібраний — тієї самої версії, з виправленнями монітора та інжекцією кадрів; стоковий файл у `vendor_dlkm` не змінюється і повертається після будь-якого перезавантаження без модуля. Перша підміна ручна, як і `nh-kmod load`:
-
-```bash
-adb shell su -c "nh-wlan-driver swap"     # очікуйте: Swap OK ... Swap on boot enabled
-adb shell su -c "nh-wlan monitor 9"       # monitor mode: wlan0 (receive + injection)
-```
-
-Модуль прив'язаний саме до цієї збірки прошивки (перевіряються ядро, збірка vendor і стоковий драйвер) і після оновлення Nothing OS нічого не робить, доки драйвер не перезберуть. Результати тестів, обмеження і запобіжники: [wlan-inject/README.uk.md](wlan-inject/README.uk.md).
+**Injection на вбудованому Wi-Fi** входить у цей один модуль і увімкнена за замовчуванням: після старту драйвер Wi-Fi підміняється **у пам'яті** на перезібраний — тієї самої версії, з виправленнями монітора та інжекцією кадрів; стоковий файл у `vendor_dlkm` не змінюється і повертається після будь-якого перезавантаження без модуля. Підміна прив'язана саме до цієї збірки прошивки (перевіряються ядро, збірка vendor і стоковий драйвер) і пропускається після оновлення Nothing OS, доки драйвер не перезберуть. Вимкнути: `nh-wlan-driver autoswap off`. Результати тестів, обмеження і запобіжники: [wlan-inject/README.uk.md](wlan-inject/README.uk.md).
 
 ---
 
@@ -141,7 +134,7 @@ adb shell su -c "nh-wlan monitor 9"       # monitor mode: wlan0 (receive + injec
 |---|---|
 | `nh-kmod load \| unload \| status \| autoload on\|off` | завантажити/вивантажити драйвери, показати стан |
 | `nh-wlan monitor [канал] \| managed \| channel N \| status` | monitor mode вбудованого Wi-Fi (типово канал 6 — **обов'язковий**, без каналу монітор мертвий) |
-| `nh-wlan-driver swap \| restore \| status \| autoswap on\|off` | (модуль `nethunter-wlan-inject`) підмінити драйвер вбудованого Wi-Fi на збірку з injection або повернути стоковий |
+| `nh-wlan-driver swap \| restore \| status \| autoswap on\|off` | підмінити драйвер вбудованого Wi-Fi на збірку з injection або повернути стоковий (підміняється автоматично при старті) |
 | `nh-bt start \| stop \| status \| install-bluebinder` | вбудований Bluetooth як `hci0` через AIDL-міст |
 | `nh-fix-nethunter boot \| cache \| commands \| su \| check` | фікси NetHunter нижче |
 
@@ -184,13 +177,12 @@ tools/build-all.sh 15756704 f0987337fa351d7e303b071df533fd4c1c194687
 
 ```
 module/nethunter-kmods/   Модуль Magisk/KernelSU: скрипти-утиліти (.ko/прошивки збираються, не комітяться)
-module/nethunter-wlan-inject/  другий модуль: підміняє драйвер вбудованого Wi-Fi після старту (.ko збирається, не комітиться)
 wlan-inject/              як зібрати цей драйвер: дельта апстріму, паритет зі стоковою збіркою, патчі injection, перевірки
 btbridge/nh-btbridge.c    Міст AIDL Bluetooth HAL ↔ /dev/vhci  (+ build.sh)
 patches/                  5 мінімальних патчів драйверів, по одному файлу, кожен пояснено
 config/                   фрагмент конфігу ядра: що додано і що неможливо та чому
 oot/                      модуль minstrel_ht + наш клей для out-of-tree Realtek-драйверів
-tools/                    build-all.sh, fetch-*.sh, check_gki_access.py (симулятор завантаження GKI), kocrc.py, pack-wlan-inject.sh
+tools/                    build-all.sh, fetch-*.sh, check_gki_access.py (симулятор завантаження GKI), kocrc.py, add-wlan-inject.sh
 docker/                   образ збірки clang-18 arm64
 ```
 
@@ -198,7 +190,7 @@ docker/                   образ збірки clang-18 arm64
 
 ## Видалення
 
-Magisk → *Modules* → видалити `nethunter-kmods`, `nethunter-wlan-inject` (і NetHunter) → Reboot, потім прошити стоковий `init_boot.img`. Заблокувати завантажувач (стирає дані, лише стокова прошивка): `fastboot flashing lock`.
+Magisk → *Modules* → видалити `nethunter-kmods` (і NetHunter) → Reboot, потім прошити стоковий `init_boot.img`. Заблокувати завантажувач (стирає дані, лише стокова прошивка): `fastboot flashing lock`.
 
 ## Ліцензія
 

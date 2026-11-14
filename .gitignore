@@ -26,9 +26,10 @@ Module.symvers
 /module/nethunter-kmods/system/bin/nh-btbridge
 /module/nethunter-kmods/*.log
 
-# --- Драйвер вбудованого Wi-Fi (wlan-inject): зібраний .ko і журнали — не в репозиторії ---
+# --- Драйвер вбудованого Wi-Fi (wlan-inject): зібраний .ko, значення прив'язки до прошивки і журнали ---
 /wlan-inject/*.log
-/module/nethunter-wlan-inject/*.log
+/module/nethunter-kmods/wlan/
+/module/nethunter-kmods/*.log
 
 # --- Сторонні драйвери: клонуються tools/fetch-oot.sh ---
 /oot/8812au-20210820/

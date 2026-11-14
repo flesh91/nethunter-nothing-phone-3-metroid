@@ -3,8 +3,8 @@
 # Глобальний monitor mode вбудованого Wi-Fi (Qualcomm qcacld-3.0, параметр con_mode=4).
 # Без явно виставленого каналу інтерфейс у моніторі не приймає жодного кадру (NO-CARRIER) —
 # тому monitor завжди ставить канал (типово 6).
-# Інжекція: стоковий драйвер у моніторі лише приймає; зі збіркою драйвера з модуля
-# nethunter-wlan-inject (перевірка: nh-wlan-driver status) у цьому ж режимі працює й інжекція.
+# Інжекція: стоковий драйвер у моніторі лише приймає; з драйвером інжекції, який модуль підміняє
+# після старту (перевірка: nh-wlan-driver status), у цьому ж режимі працює й інжекція.
 # Паралельний монітор поряд із підключенням не підтримується — тому на час монітора
 # Wi-Fi в Android вимикається.
 STATE=/data/adb/nethunter-kmods-wlan
@@ -94,7 +94,7 @@ case "$1" in
     echo "con_mode: $(cat "$P") ($P)"
     case "$(iface_type)" in 803) echo "$IFACE: monitor";; 1) echo "$IFACE: managed";; "") echo "$IFACE: absent";; *) echo "$IFACE: type $(iface_type)";; esac
     iw dev $IFACE info 2>/dev/null | grep -E "channel" | sed 's/^[[:space:]]*//'
-    injection_capable && echo "injection: supported (nethunter-wlan-inject driver)" || echo "injection: not supported (stock driver)"
+    injection_capable && echo "injection: supported (injection driver loaded)" || echo "injection: not supported (stock driver)"
     wifi_enabled && echo "Android Wi-Fi: on" || echo "Android Wi-Fi: off"
     ;;
   *) echo "usage: nh-wlan monitor [channel, default 6] | managed | channel <N> | status"; exit 1 ;;

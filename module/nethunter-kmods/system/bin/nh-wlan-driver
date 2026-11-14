@@ -1,15 +1,17 @@
 #!/system/bin/sh
 # nh-wlan-driver swap|restore|status|autoswap [on|off]
-# Підміна стокового драйвера вбудованого Wi-Fi (qca_cld3_wcn7750) на власну збірку з монітором
-# та інжекцією. Підміна живе до перезавантаження; на старті її повторює service.sh модуля.
-# Сам режим монітора вмикає nh-wlan (модуль nethunter-kmods): nh-wlan monitor <канал>.
-MODDIR="${NH_WLAN_MODDIR:-/data/adb/modules/nethunter-wlan-inject}"
+# Підміна стокового драйвера вбудованого Wi-Fi (qca_cld3_wcn7750) на збірку з монітором та інжекцією.
+# Підміна живе до перезавантаження; на старті її повторює wlan-boot.sh модуля (за замовчуванням увімкнено).
+# Сам режим монітора вмикає nh-wlan: nh-wlan monitor <канал>.
+MODDIR="${NH_WLAN_MODDIR:-/data/adb/modules/nethunter-kmods}"
+W="$MODDIR/wlan"
 NAME=qca_cld3_wcn7750
-OURS="$MODDIR/$NAME.ko"
+OURS="$W/$NAME.ko"
 STOCK="/vendor_dlkm/lib/modules/$NAME.ko"
 SYS="/sys/module/$NAME"
-LOG="$MODDIR/swap.log"
-MARK="$MODDIR/swapping"
+LOG="$W/swap.log"
+MARK="$W/swapping"
+OFF="$W/autoswap-off"
 SETTLE="${NH_WLAN_SETTLE:-20}"
 
 say() { echo "$*"; echo "[$(date '+%F %T')] $*" >> "$LOG" 2>/dev/null; }
@@ -35,15 +37,16 @@ wait_for() { # $1=команда-умова, $2=секунди
   return 0
 }
 
-# Запобіжник сумісності: ядро, прошивка і стоковий драйвер — саме ті, під які нашу збірку
-# зібрано й перевірено. Після оновлення Nothing OS хоч одне з трьох зміниться — тоді не підміняємо:
-# драйвер, що не відповідає прошивці Wi-Fi, перезавантажує телефон у момент увімкнення Wi-Fi.
+# Запобіжник сумісності: ядро, прошивка і стоковий драйвер — саме ті, під які драйвер зібрано й перевірено.
+# Після оновлення Nothing OS хоч одне з трьох зміниться — тоді не підміняємо: драйвер, що не відповідає
+# прошивці Wi-Fi, перезавантажує телефон у момент увімкнення Wi-Fi.
 guard() {
+  if [ ! -f "$OURS" ]; then say "The injection driver is not included in this build of the module"; return 1; fi
   want_k="$(cat "$MODDIR/kernel.release" 2>/dev/null)"
-  want_f="$(cat "$MODDIR/vendor.fingerprint" 2>/dev/null)"
-  want_s="$(cat "$MODDIR/stock.sha256" 2>/dev/null)"
-  if [ -z "$want_k" ] || [ -z "$want_f" ] || [ -z "$want_s" ] || [ ! -f "$OURS" ]; then
-    say "Module files are incomplete in $MODDIR - not swapping"; return 1
+  want_f="$(cat "$W/vendor.fingerprint" 2>/dev/null)"
+  want_s="$(cat "$W/stock.sha256" 2>/dev/null)"
+  if [ -z "$want_k" ] || [ -z "$want_f" ] || [ -z "$want_s" ]; then
+    say "Module files are incomplete in $W - not swapping"; return 1
   fi
   if [ "$(uname -r)" != "$want_k" ]; then
     say "Kernel $(uname -r) != $want_k (Nothing OS update?) - not swapping, rebuild required"; return 1
@@ -77,12 +80,12 @@ case "$1" in
     if [ "$(cat "$SYS/parameters/con_mode" 2>/dev/null)" != "0" ]; then
       say "Driver is not in normal mode (monitor?) - run first: nh-wlan managed"; exit 3
     fi
-    if [ -f "$MODDIR/crashed" ]; then
-      say "Warning: the previous swap was interrupted by a reboot ($(cat "$MODDIR/crashed"))"
-      rm -f "$MODDIR/crashed"
+    if [ -f "$W/crashed" ]; then
+      say "Warning: the previous swap was interrupted by a reboot ($(cat "$W/crashed"))"
+      rm -f "$W/crashed"
     fi
     # маркер на диску до будь-яких дій: якщо телефон перезавантажиться посеред підміни,
-    # service.sh побачить його на наступному старті й вимкне автопідміну
+    # wlan-boot.sh побачить його на наступному старті й вимкне автопідміну
     echo "$(date '+%F %T')" > "$MARK"; sync
     was="$(wifi_down)"
     if ! wait_for refcnt_zero 30; then
@@ -114,10 +117,6 @@ case "$1" in
     fi
     rm -f "$MARK"; sync
     say "Swap OK: injection driver loaded (Wi-Fi $([ "$was" = "1" ] && echo "turned back on" || echo "left off"))"
-    if [ ! -f "$MODDIR/autoswap" ]; then
-      touch "$MODDIR/autoswap"
-      say "Swap on boot enabled (disable: nh-wlan-driver autoswap off)"
-    fi
     ;;
   restore)
     if [ -d "$SYS" ] && ! is_ours; then say "Stock driver is already loaded"; exit 0; fi
@@ -133,25 +132,29 @@ case "$1" in
     insmod "$STOCK" 2>>"$LOG" || { say "Could not load the stock driver (a reboot restores it)"; exit 5; }
     sleep 3
     [ "$was" = "1" ] && wifi_back_on
-    say "Stock driver restored (until the next boot swap; disable it: nh-wlan-driver autoswap off)"
+    say "Stock driver restored until the next boot (to keep it after reboots: nh-wlan-driver autoswap off)"
     ;;
   status)
     if [ ! -d "$SYS" ]; then echo "driver: not loaded"
     elif is_ours; then echo "driver: injection build (monitor + injection)"
     else echo "driver: stock"; fi
     [ -d "$SYS" ] && echo "con_mode: $(cat "$SYS/parameters/con_mode" 2>/dev/null) (0 = normal, 4 = monitor)"
-    [ -f "$MODDIR/autoswap" ] && echo "swap on boot: on" || echo "swap on boot: off"
+    [ -f "$OFF" ] && echo "swap on boot: off" || echo "swap on boot: on"
     [ -f "$MARK" ] && echo "swap in progress or interrupted: $(cat "$MARK")"
-    [ -f "$MODDIR/crashed" ] && echo "last swap was interrupted by a reboot: $(cat "$MODDIR/crashed")"
-    echo "built for: kernel $(cat "$MODDIR/kernel.release" 2>/dev/null)"
-    echo "           vendor $(cat "$MODDIR/vendor.fingerprint" 2>/dev/null)"
-    LOG=/dev/null; guard >/dev/null && echo "compatibility: ok" || echo "compatibility: MISMATCH (no swap until rebuilt)"
+    [ -f "$W/crashed" ] && echo "last swap was interrupted by a reboot: $(cat "$W/crashed")"
+    if [ -f "$OURS" ]; then
+      echo "built for: kernel $(cat "$MODDIR/kernel.release" 2>/dev/null)"
+      echo "           vendor $(cat "$W/vendor.fingerprint" 2>/dev/null)"
+      LOG=/dev/null; guard >/dev/null && echo "compatibility: ok" || echo "compatibility: MISMATCH (no swap until rebuilt)"
+    else
+      echo "injection driver: not included in this build of the module"
+    fi
     ;;
   autoswap)
     case "$2" in
-      on) rm -f "$MARK" "$MODDIR/crashed"; touch "$MODDIR/autoswap"; echo "swap on boot: on" ;;
-      off) rm -f "$MODDIR/autoswap"; echo "swap on boot: off" ;;
-      *) [ -f "$MODDIR/autoswap" ] && echo "swap on boot: on" || echo "swap on boot: off" ;;
+      on) rm -f "$OFF" "$MARK" "$W/crashed"; echo "swap on boot: on" ;;
+      off) mkdir -p "$W"; touch "$OFF"; echo "swap on boot: off" ;;
+      *) [ -f "$OFF" ] && echo "swap on boot: off" || echo "swap on boot: on" ;;
     esac ;;
   *) echo "usage: nh-wlan-driver swap|restore|status|autoswap [on|off]"; exit 1 ;;
 esac

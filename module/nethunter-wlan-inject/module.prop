@@ -1,6 +1,0 @@
-id=nethunter-wlan-inject
-name=NetHunter internal Wi-Fi injection (Nothing Phone 3)
-version=v1
-versionCode=1
-author=flesh91
-description=Built-in WCN7750 Wi-Fi driver rebuilt with monitor mode and packet injection (qcacld-3.0 5.2.1.123K). Swaps the stock driver after boot; falls back to stock on any mismatch. Commands: nh-wlan-driver swap|restore|status|autoswap

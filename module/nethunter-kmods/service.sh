@@ -16,20 +16,24 @@ if [ -f "$KALI_BB" ] && ! grep -q nh-btbridge "$KALI_BB"; then
   sh "$MODDIR/system/bin/nh-bt" install-bluebinder > "$MODDIR/bluebinder.log" 2>&1
 fi
 
-# Запобіжник 1: якщо попереднє завантаження модулів не дійшло до кінця
-# (телефон перезавантажився посеред insmod) — більше не вантажимо автоматично.
-if [ -f "$MODDIR/loading" ]; then
-  rm -f "$MODDIR/autoload"
-  echo "Previous load was interrupted at module: $(cat "$MODDIR/loading")" > "$LOG"
-  echo "Autoload disabled. Details: /sys/fs/pstore or logs; re-enable: su -c nh-kmod autoload on" >> "$LOG"
-  mv "$MODDIR/loading" "$MODDIR/crashed-on"
-  exit 0
-fi
+# Драйвери вантажаться автоматично (вимкнути: nh-kmod autoload off).
+kmods_boot() {
+  # Запобіжник: якщо попереднє завантаження модулів не дійшло до кінця
+  # (телефон перезавантажився посеред insmod) — більше не вантажимо автоматично.
+  if [ -f "$MODDIR/loading" ]; then
+    touch "$MODDIR/autoload-off"
+    echo "Previous load was interrupted at module: $(cat "$MODDIR/loading")" > "$LOG"
+    echo "Autoload disabled. Details: /sys/fs/pstore or logs; re-enable: su -c nh-kmod autoload on" >> "$LOG"
+    mv "$MODDIR/loading" "$MODDIR/crashed-on"; sync
+    return
+  fi
+  if [ -f "$MODDIR/autoload-off" ]; then
+    echo "Autoload is off. Load now: su -c nh-kmod load; enable on boot: su -c nh-kmod autoload on" > "$LOG"
+    return
+  fi
+  "$MODDIR/system/bin/nh-kmod" load > "$LOG" 2>&1
+}
+kmods_boot
 
-# Запобіжник 2: автозавантаження вмикається лише після першого успішного ручного `nh-kmod load`.
-if [ ! -f "$MODDIR/autoload" ]; then
-  echo "Autoload not enabled yet. Run the first load manually: su -c nh-kmod load" > "$LOG"
-  exit 0
-fi
-
-"$MODDIR/system/bin/nh-kmod" load > "$LOG" 2>&1
+# Драйвер вбудованого Wi-Fi з інжекцією (вимкнути: nh-wlan-driver autoswap off)
+sh "$MODDIR/wlan-boot.sh"
