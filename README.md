@@ -40,6 +40,7 @@ Legend: ✅ verified live on the device · 🟡 built & loads, not exercised wit
 | Built-in Bluetooth as Linux `hci0` (`nh-bt` + `nh-btbridge`) | ✅ | classic inquiry + LE scan; works under SELinux Enforcing |
 | Built-in Wi-Fi **monitor mode** (`nh-wlan`) | ✅ | capture on 2.4/5 GHz, channel switching; receive-only with the stock driver |
 | Built-in Wi-Fi **packet injection** (optional `nethunter-wlan-inject` module) | ✅ | the Wi-Fi driver rebuilt, **still no custom kernel**: `aireplay-ng --test` 30/30 on 2.4 and 5 GHz, steady monitor RX — see [wlan-inject](wlan-inject/README.md) |
+| External USB Wi-Fi: Atheros AR9271 (tested with TP-Link TL-WN722N **v1**) | ✅ | `ath9k_htc` loads on plug-in, `htc_9271` firmware loads, `wlan1` appears; monitor mode, `aireplay-ng --test` 30/30 on my AP; deauth + full WPA2 4-way handshake captured on my own network |
 | USB Arsenal: HID keyboard+mouse, mass storage, ACM, ECM | ✅ | gadget functions enumerate on a host PC (stock-kernel gadget) |
 | NetHunter 32-bit busybox fix (`nh-fix-nethunter`) | ✅ | 64-bit device needs a 64-bit busybox; applied every boot |
 | NetHunter `su: unknown user root` fix | ✅ | custom commands with `su` now run from NetHunter Terminal |
@@ -47,13 +48,13 @@ Legend: ✅ verified live on the device · 🟡 built & loads, not exercised wit
 
 ### Built, not yet hardware-tested (🟡)
 
-External USB Wi-Fi adapters (and with them injection + firmware loading), USB Bluetooth dongles, USB-serial/UART adapters, CAN adapters, USB-Ethernet. Drivers and 77 firmware files are in the module; they just haven't been exercised with the physical hardware yet.
+Other external USB Wi-Fi adapters (every chipset below except AR9271), USB Bluetooth dongles, USB-serial/UART adapters, CAN adapters, USB-Ethernet. Drivers and 77 firmware files are in the module; they just haven't been exercised with the physical hardware yet.
 
 **USB Wi-Fi adapters covered:**
 
 | Chipset | Driver | Common adapters |
 |---|---|---|
-| Atheros AR9271 / AR7010 | `ath9k_htc` | Alfa AWUS036NHA, TP-Link TL-WN722N **v1** |
+| Atheros AR9271 / AR7010 | `ath9k_htc` | Alfa AWUS036NHA, TP-Link TL-WN722N **v1** — ✅ *tested* |
 | Ralink RT3070/3572/5370/5572 | `rt2800usb` | Alfa AWUS036NH/NEH, Panda PAU05/09 |
 | Ralink RT2501/2573 | `rt73usb`, `rt2500usb` | older Alfa/Edimax |
 | Realtek RTL8187L | `rtl8187` | Alfa AWUS036H |
@@ -64,6 +65,8 @@ External USB Wi-Fi adapters (and with them injection + firmware loading), USB Bl
 | Realtek RTL8822BU/8821CU/8723DU, 8xxx | `rtw88_*u`, `rtl8xxxu` | TP-Link Archer T3U/T2U |
 
 **Recommended adapter if you don't have one:** Alfa **AWUS036ACM** (MT7612U) or **AWUS036ACHM** (MT7610U) — in-kernel drivers, stable monitor + injection, 2.4/5 GHz. For 2.4 GHz and maximum tool compatibility, **AWUS036NHA** (AR9271).
+
+**With an external adapter:** work on `wlan1` and leave `wlan0` alone — skip `airmon-ng check kill`, it can take down the phone's own Wi-Fi. While `airodump-ng` holds the channel, run `aireplay-ng` with `--ignore-negative-one`; otherwise it waits for a beacon on "channel -1" and sends nothing.
 
 ### Not possible on the stock kernel (❌)
 

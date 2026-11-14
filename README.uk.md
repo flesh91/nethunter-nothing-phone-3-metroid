@@ -40,6 +40,7 @@
 | Вбудований Bluetooth як Linux `hci0` (`nh-bt` + `nh-btbridge`) | ✅ | класичне сканування + LE; працює під SELinux Enforcing |
 | **Monitor mode** вбудованого Wi-Fi (`nh-wlan`) | ✅ | захоплення на 2.4/5 ГГц, перемикання каналів; зі стоковим драйвером лише приймання |
 | **Packet injection** на вбудованому Wi-Fi (необов'язковий модуль `nethunter-wlan-inject`) | ✅ | перезібраний драйвер Wi-Fi, **ядро так само стокове**: `aireplay-ng --test` 30/30 на 2.4 і 5 ГГц, рівне приймання в моніторі — див. [wlan-inject](wlan-inject/README.uk.md) |
+| Зовнішній USB Wi-Fi: Atheros AR9271 (перевірено на TP-Link TL-WN722N **v1**) | ✅ | `ath9k_htc` вантажиться при підключенні, прошивка `htc_9271` підхоплюється, з'являється `wlan1`; monitor mode, `aireplay-ng --test` 30/30 на моїй точці; deauth і повний WPA2 4-way handshake захоплено на власній мережі |
 | USB Arsenal: HID клавіатура+миша, mass storage, ACM, ECM | ✅ | USB-функції визначаються хостом (гаджет зі стокового ядра) |
 | Фікс 32-бітного busybox NetHunter (`nh-fix-nethunter`) | ✅ | 64-бітному пристрою потрібен 64-бітний busybox; застосовується щозавантаження |
 | Фікс `su: unknown user root` у NetHunter | ✅ | команди з `su` тепер працюють з NetHunter Terminal |
@@ -47,13 +48,13 @@
 
 ### Зібрано, із залізом ще не перевірено (🟡)
 
-Зовнішні USB Wi-Fi адаптери (а з ними injection і завантаження прошивок), USB Bluetooth-донгли, USB-serial/UART адаптери, CAN-адаптери, USB-Ethernet. Драйвери і 77 файлів прошивок у модулі є, їх просто ще не випробувано на реальному залізі.
+Інші зовнішні USB Wi-Fi адаптери (усі чипсети нижче, крім AR9271), USB Bluetooth-донгли, USB-serial/UART адаптери, CAN-адаптери, USB-Ethernet. Драйвери і 77 файлів прошивок у модулі є, їх просто ще не випробувано на реальному залізі.
 
 **Підтримувані USB Wi-Fi адаптери:**
 
 | Чипсет | Драйвер | Популярні адаптери |
 |---|---|---|
-| Atheros AR9271 / AR7010 | `ath9k_htc` | Alfa AWUS036NHA, TP-Link TL-WN722N **v1** |
+| Atheros AR9271 / AR7010 | `ath9k_htc` | Alfa AWUS036NHA, TP-Link TL-WN722N **v1** — ✅ *перевірено* |
 | Ralink RT3070/3572/5370/5572 | `rt2800usb` | Alfa AWUS036NH/NEH, Panda PAU05/09 |
 | Ralink RT2501/2573 | `rt73usb`, `rt2500usb` | старі Alfa/Edimax |
 | Realtek RTL8187L | `rtl8187` | Alfa AWUS036H |
@@ -64,6 +65,8 @@
 | Realtek RTL8822BU/8821CU/8723DU, 8xxx | `rtw88_*u`, `rtl8xxxu` | TP-Link Archer T3U/T2U |
 
 **Який адаптер узяти:** Alfa **AWUS036ACM** (MT7612U) або **AWUS036ACHM** (MT7610U) — драйвери в ядрі, стабільний monitor + injection, 2.4/5 ГГц. Для 2.4 ГГц і максимальної сумісності з інструментами — **AWUS036NHA** (AR9271).
+
+**Із зовнішнім адаптером:** працюйте на `wlan1` і не чіпайте `wlan0` — не запускайте `airmon-ng check kill`, він може вимкнути власний Wi-Fi телефона. Поки `airodump-ng` тримає канал, запускайте `aireplay-ng` з `--ignore-negative-one`, інакше він чекає бікона на «channel -1» і нічого не надсилає.
 
 ### Неможливо на стоковому ядрі (❌)
 
