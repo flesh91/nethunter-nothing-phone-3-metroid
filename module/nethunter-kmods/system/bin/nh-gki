@@ -2,8 +2,10 @@
 # nh-gki load|unload|status|autoload [on|off]
 # Extra kernel features of the NetHunter boot kernel (variant B, see kernel-recipe/): CAN ISO-TP/J1939
 # and more USB CAN adapters, Bluetooth PAN (BNEP) and BPA10x, USB RNDIS/QMI/MBIM/DM9601/MCS7830
-# networking, PN533 NFC readers, NFS client and server, netlink diag, CAN-id tc ematch.
-# They exist only in that kernel, so on the stock kernel this does nothing.
+# networking, PN533 NFC readers, NFS client and server, netlink diag, CAN-id tc ematch, and the USB
+# Wi-Fi drivers that need vmlinux exports only that kernel keeps (built by tools/build-all.sh,
+# listed in config/nh-kernel-only.list). They work only with that kernel, so on the stock one this
+# does nothing.
 # What to load and in which order comes from gki/load.order (written by tools/add-gki-extras.sh):
 #   <file> new|parent:<symbol> <depends csv>
 # A "parent" is a module Google also ships, but with exports trimmed away that our new modules need
@@ -25,7 +27,9 @@ loaded() { grep -q "^$(n_ "$1") " /proc/modules; }
 # our parent builds keep exports Google trimmed: their __ksymtab entry tells them apart
 exports() { grep -qE " __ksymtab_$1([[:space:]]|\$)" /proc/kallsyms; }
 ours_kernel() { [ -f "$G/kernel.version" ] && [ "$(cat /proc/version)" = "$(cat "$G/kernel.version")" ]; }
-gki() { modprobe -d "$SYSD" "$1" >/dev/null 2>>"$LOG"; }  # Google's module from system_dlkm (+deps)
+# Google's module from system_dlkm (+deps). Android's own modprobe (toolbox, as init uses it): Magisk runs
+# boot scripts in BusyBox standalone mode, where a bare "modprobe" is BusyBox's, which has no -d.
+gki() { /system/bin/toolbox modprobe -d "$SYSD" "$1" >/dev/null 2>>"$LOG"; }
 shipped() { awk '{print $1}' "$ORDER" | tr - _ | grep -qx "$(n_ "$1")"; }
 file_of() { awk -v n="$(n_ "$1")" '{f=$1; gsub("-","_",f); if (f==n) print $1}' "$ORDER"; }
 ins() { # $1 = shipped file name without .ko
@@ -33,13 +37,49 @@ ins() { # $1 = shipped file name without .ko
   echo "$1" > "$MARK"; sync    # if the phone dies inside insmod, gki-boot.sh turns autoload off
   insmod "$G/$1.ko" 2>>"$LOG"
 }
+# a module of the stock-kernel part of nethunter-kmods (modules/), e.g. ath for carl9170
+kmod() {
+  for k in "$MODDIR/modules/$1.ko" "$MODDIR/modules/$(echo "$1" | tr _ -).ko"; do
+    [ -f "$k" ] && { echo "$1" > "$MARK"; sync; insmod "$k" 2>>"$LOG"; return; }   # marker as in ins()
+  done
+  return 1
+}
+# USB Wi-Fi in gki/ (carl9170, zd1211rw) needs what nh-kmod normally sets up - it may be off:
+# the module's firmware dir in the firmware search path, and a rate control for the vendor mac80211
+# (built without one) - minstrel_ht from the stock part, made the default.
+FWDIR="$MODDIR/firmware"
+FWPARAM=/sys/module/firmware_class/parameters/path
+fw_add() {
+  [ -d "$FWDIR" ] || return 0
+  cur="$(cat "$FWPARAM" 2>/dev/null)"
+  case ",$cur," in *",$FWDIR,"*) return 0 ;; esac
+  new="${cur%,}"; [ -n "$new" ] && new="$new,$FWDIR" || new="$FWDIR"
+  echo -n "$new" > "$FWPARAM" 2>>"$LOG" || say "could not add $FWDIR to the firmware path"
+}
+rate_ctl() {
+  loaded rc80211_minstrel_ht || kmod rc80211_minstrel_ht ||
+    { say "rc80211_minstrel_ht did not load - mac80211 USB Wi-Fi will not start"; return 1; }
+  p=/sys/module/mac80211/parameters/ieee80211_default_rc_algo
+  [ "$(cat $p 2>/dev/null)" = minstrel_ht ] || echo -n minstrel_ht > $p
+}
+# unload every module holding $1, holders of holders first (cdc_ether is held by cdc_ncm and
+# r8153_ecm); each one is prepended to $back, so reload "$back" puts providers back before users
+unhold() {
+  local h
+  for h in $(ls "/sys/module/$1/holders" 2>/dev/null); do
+    loaded "$h" || continue          # already gone through another holder
+    unhold "$h" || return 1
+    rmmod "$h" 2>>"$LOG" || { say "$name: $h is in use - keeping Google's $name"; return 1; }
+    back="$h $back"
+  done
+}
+# put back modules removed for unload: the nethunter-kmods copy or Google's, never ours from gki/
+restore() { for d in $1; do loaded "$d" || kmod "$d" || gki "$d"; done; }
 # put a module back after a parent swap: ours if shipped, the nethunter-kmods copy, else Google's
 reload() {
   for d in $1; do
     if shipped "$d"; then ins "$(file_of "$d")"
-    elif [ -f "$MODDIR/modules/$d.ko" ]; then insmod "$MODDIR/modules/$d.ko" 2>>"$LOG"
-    elif [ -f "$MODDIR/modules/$(echo "$d" | tr _ -).ko" ]; then insmod "$MODDIR/modules/$(echo "$d" | tr _ -).ko" 2>>"$LOG"
-    else gki "$d"; fi
+    else kmod "$d" || gki "$d"; fi
   done
 }
 # parent FILE SYMBOL: our build of FILE in place of Google's
@@ -48,10 +88,7 @@ parent() {
   if loaded "$name" && exports "$sym"; then return 0; fi
   back=""
   if loaded "$name"; then
-    for h in $(ls "/sys/module/$name/holders" 2>/dev/null); do
-      rmmod "$h" 2>>"$LOG" || { say "$name: $h is in use - keeping Google's $name"; reload "$back"; return 1; }
-      back="$back $h"
-    done
+    unhold "$name" || { reload "$back"; return 1; }
     rmmod "$name" 2>>"$LOG" || { say "$name: in use - keeping Google's copy"; reload "$back"; return 1; }
   fi
   if ins "$f"; then reload "$back"; return 0; fi
@@ -62,6 +99,8 @@ parent() {
 load() {
   if [ ! -f "$ORDER" ]; then say "NetHunter-kernel features are not included in this build of the module"; return 0; fi
   if ! ours_kernel; then say "Not the NetHunter kernel - its extra features stay idle"; return 0; fi
+  fw_add
+  awk '{print $3}' "$ORDER" | tr , '\n' | grep -qx mac80211 && rate_ctl
   ok=""; bad=""; failed=" "
   while read -r f kind deps; do
     [ -n "$f" ] || continue
@@ -69,11 +108,15 @@ load() {
     for d in $(echo "$deps" | tr , ' '); do
       [ "$d" = "-" ] && continue
       case "$failed" in *" $(n_ "$d") "*) skip="$d"; break ;; esac
-      shipped "$d" || loaded "$d" || gki "$d" || { skip="$d"; break; }
+      shipped "$d" || loaded "$d" || kmod "$d" || gki "$d" || { skip="$d"; break; }
     done
     if [ -n "$skip" ]; then bad="$bad $f(needs $skip)"; failed="$failed$(n_ "$f") "; continue; fi
     case "$kind" in
-      parent:*) if parent "$f" "${kind#parent:}"; then ok="$ok $f*"; else bad="$bad $f"; failed="$failed$(n_ "$f") "; fi ;;
+      # a failed swap with Google's copy still loaded does not fail the dependents: most of them
+      # are fine with it; one that needs the trimmed exports fails at its own insmod (e.g. rndis_wlan)
+      parent:*) if parent "$f" "${kind#parent:}"; then ok="$ok $f*"
+                elif loaded "$f"; then bad="$bad $f(Google's kept)"
+                else bad="$bad $f"; failed="$failed$(n_ "$f") "; fi ;;
       *)        if ins "$f"; then ok="$ok $f"; else bad="$bad $f"; failed="$failed$(n_ "$f") "; fi ;;
     esac
   done < "$ORDER"
@@ -89,10 +132,16 @@ unload() {
     loaded "$f" || continue
     case "$kind" in
       parent:*) exports "${kind#parent:}" || continue
-                rmmod "$(n_ "$f")" 2>>"$LOG" && gki "$(n_ "$f")" || say "$f is in use - left loaded" ;;
+                # ours may be held by Google's modules (usbnet: cdc_ether, r8153_ecm...): take them off
+                # the same way load did, put Google's parent back, then them
+                name="$(n_ "$f")"; back=""
+                if unhold "$name" && rmmod "$name" 2>>"$LOG"; then gki "$name"
+                else say "$f is in use - left loaded"; fi
+                restore "$back" ;;
       *)        rmmod "$(n_ "$f")" 2>>"$LOG" || say "$f is in use - left loaded" ;;
     esac
   done
+  rm -f "$MARK"; sync   # restore() -> kmod() sets it; a leftover would read as a crash on the next boot
   say "NetHunter-kernel features unloaded until the next boot (to keep them off: nh-gki autoload off)"
 }
 

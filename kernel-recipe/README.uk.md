@@ -49,8 +49,11 @@ Google публікує артефакти цієї збірки на ci.android
 | NFS клієнт і сервер | `NFS_FS` (`V2/V3/V4`), `NFSD` (`V4`) → sunrpc, lockd, grace, rpcsec_gss_krb5, dns_resolver | ✅ `nfs`/`nfs4`/`nfsd` у `/proc/filesystems` (монтування — ще ні) |
 | Діагностика netlink-сокетів | `NETLINK_DIAG` | ✅ `ss -a -A netlink` |
 | Примусове вивантаження модулів | `MODULE_FORCE_UNLOAD=y` | ✅ у конфігу запущеного ядра |
+| Старі USB Wi-Fi AR9170 / ZD1211 / Broadcom 4320 | драйвери — модулем з конвеєра (`config/nh-kernel-only.list`), ядро лишає їм експорти з [`extra-exports.txt`](extra-exports.txt) | 🟡 вантажаться |
 
 Фрагмент — [`nethunter.config`](nethunter.config). Вбудована Wi-Fi-інжекція лишається в модулі.
+Додаткові експорти — [`extra-exports.txt`](extra-exports.txt): функції vmlinux і модулів, які Google вирізає
+(`TRIM_UNUSED_KSYMS`), а USB Wi-Fi-драйверам з модуля вони потрібні. Лише нові експорти: CRC стокових не змінюються.
 
 ### Звірка з офіційним списком NetHunter (106 опцій)
 
@@ -58,7 +61,9 @@ Google публікує артефакти цієї збірки на ci.android
 - **вже є у стоку**: CAN core/raw/bcm/gw/dev/slcan/vcan, cdc-acm, rtl8150/8152, ftdi_sio, hci_uart, binder, devlink, vsock;
 - **дає модуль `nethunter-kmods`**: USB Wi-Fi (Ralink rt2800/rt73/rt2500, ath9k_htc, mt7601u/mt76, rtl8187, rtl8xxxu, 88xxau), USB-BT (btusb, bfusb, bcm203x, ath3k, hci_vhci), CAN gs_usb/peak_usb/usb_8dev, ch341;
 - **додано в ядро** — таблиця вище;
-- **лише модулем, ще не додано**: carl9170, zd1211rw, zd1201, rtl8192cu, ath6kl, rndis_wlan — на цьому телефоні `cfg80211`/`mac80211` вендорські (Qualcomm), тож USB Wi-Fi живе в модулі, не в ядрі;
+- **USB Wi-Fi, що лишились** — модулем, не в ядрі, бо `cfg80211`/`mac80211` на цьому телефоні вендорські (Qualcomm):
+  zd1201, rtl8192cu, ath6kl працюють і на стоковому ядрі; carl9170, zd1211rw, rndis_wlan — лише з цим ядром
+  (їм потрібні `usb_poison_anchored_urbs`, `usb_wait_anchor_empty_timeout`, `usbnet_pause_rx` та ін., див. [`extra-exports.txt`](extra-exports.txt));
 - **неможливо**: `SYSVIPC` (змінює `task_struct` → ламає KMI);
 - **свідомо ні**: DVB/SDR-драйвери ядра (userspace librtlsdr/hackrf/airspy уже працює, а драйвер ядра забирав би донгли), CAN-контролери SoC/SPI/PCI (такого заліза в телефоні немає), HLCAN (поза деревом ядра), `USB_SERIAL_CONSOLE`/`GENERIC` (потребують перезбірки гуглівського usbserial), формати образу й `LOCALVERSION` (до GKI не застосовні).
 
@@ -94,7 +99,7 @@ docker run --rm -v nh-gki-src:/src -v nh-gki-out:/out \
 ```
 
 [`build-gki.sh`](build-gki.sh) стадіями:
-- **config** — стоковий конфіг + фрагмент + `SIG_PROTECT` off; друкує **кожну** відмінність від стоку
+- **config** — стоковий конфіг + фрагмент + `SIG_PROTECT` off; `extra-exports.txt` дописується до `abi_symbollist.raw`; друкує **кожну** відмінність від стоку
   (зараз 42: опції фрагмента, їхні підопції й автозалежності — sunrpc/lockd/grace/`NET_HANDSHAKE`…, `SIG_PROTECT`)
   і звіряє рядок версії. Рядок відтворено як у Kleaf: файл `localversion` в O= + `GIT_DIR` вимкнено
   для `make` (тоді `scripts/setlocalversion` не додає `-g<sha>`/`-dirty`).
@@ -135,8 +140,22 @@ docker run --rm -v nh-gki-src:/src -v nh-gki-out:/out \
       утримувачів батьківського модуля визначає з `/sys/module/<m>/holders`. Наживо (`fastboot boot`): **32 з 32**
       піднялись самі при старті, 605 модулів, 0 стокових відсутні, Wi-Fi injection, LTE; функціонально — ISO-TP, J1939,
       `em_canid`, `netlink_diag`, файлові системи NFS.
+- [x] **Ядро без Magisk-модуля** (модуль вимкнено через `disable`, `fastboot boot`): старт нормальний, стоковий драйвер Wi-Fi
+      і LTE працюють, помилок модулів немає; набір модулів = стокова базова лінія мінус рівно 62 драйвери самого модуля
+      (0 непояснених відсутніх, 0 зайвих). Тобто без модуля ядро поводиться як стокове — бутлупу немає; лише нові
+      функції недоступні, бо їхні `.ko` постачає модуль.
+- [x] **Старі USB Wi-Fi (модуль v7, 14.11.2026).** zd1201, rtl8192cu, ath6kl — у стоковій частині модуля
+      (`loaded=69 failed=0` на стоку при старті). carl9170, zd1211rw, rndis_wlan — лише з цим ядром: їх збирає конвеєр
+      модулів (`config/nh-kernel-only.list`), `add-gki-extras.sh` кладе в `gki/`, а ядро лишає їм експорти з
+      [`extra-exports.txt`](extra-exports.txt) (KMI так само IDENTICAL). rndis_wlan потребує нашого `usbnet.ko` (четвертий
+      батьківський модуль). Перевірка на цьому ядрі — `tools/check_nh_kernel_access.py`: імена + CRC для `gki/`, стокової
+      частини і гуглівських модулів поверх наших батьківських (114/114). Наживо (`fastboot boot`): 615 модулів = 583 стокових
+      + 32, **36 з 36** функцій ядра піднялись самі, `usbnet` підмінено з повним ланцюгом утримувачів (cdc_ether ← cdc_ncm,
+      r8153_ecm), гуглівські повернуто; `nh-gki unload`/`load` — туди й назад; Wi-Fi injection, LTE на обох SIM.
+      Знайдено й виправлено на пристрої: Magisk запускає скрипти в BusyBox standalone, де `modprobe` — BusyBox без `-d`,
+      тож гуглівські модулі повертаються через `/system/bin/toolbox modprobe`.
 - [ ] Наживо з залізом: RNDIS/QMI/MBIM/DM9601/MCS7830 (USB-модем/Ethernet), BNEP (BT PAN), BPA10x, Kvaser/EMS/ESD/UCAN,
-      PN533, RNDIS-гаджет; NFS — монтування (потрібні `nfs-common`/`nfs-kernel-server` у Kali).
+      PN533, RNDIS-гаджет, USB Wi-Fi carl9170/zd1211rw/rndis_wlan; NFS — монтування (потрібні `nfs-common`/`nfs-kernel-server` у Kali).
 - [ ] Постійна прошивка `boot` (тестували лише `fastboot boot`).
 - [ ] Апстрім у NetHunter.
 

@@ -67,6 +67,15 @@ docker run --rm -v nh-work:/work -v "$ROOT":/h nh-kbuild bash -euc '
     cp $k /work/stage/modules/; done
   cp /work/oot/rc80211_minstrel_ht/*.ko /work/oot/8812au-20210820/*.ko /work/oot/8814au/*.ko /work/oot/rtl8188eus/*.ko /work/stage/modules/
   for k in /work/stage/modules/*.ko; do llvm-strip --strip-debug $k; done
+  # Модулі, яким потрібне власне ядро NetHunter (config/nh-kernel-only.list): окремо, їх кладе
+  # в gki/ tools/add-gki-extras.sh; «!ім'\''я» — модуль дає саме ядро NetHunter, звідси не пакуємо.
+  mkdir -p /work/stage/modules-nh
+  grep -vE "^\s*(#|$)" /h/config/nh-kernel-only.list | while read -r n _; do
+    case "$n" in
+      !*) rm -f "/work/stage/modules/${n#!}.ko" ;;
+      *)  mv "/work/stage/modules/$n.ko" /work/stage/modules-nh/ ;;
+    esac
+  done
   for k in /work/stage/modules/*.ko; do echo "$(basename $k .ko)|$(modinfo -F depends $k)|$(modinfo -F firmware $k | tr "\n" ",")"; done > /work/stage/modinfo.txt
   rm -rf /h/build/stage && cp -r /work/stage /h/build/stage
 '
@@ -108,13 +117,38 @@ def visit(m):
             if norm(x) == norm(d): visit(x)
     order.append(m)
 visit('rc80211_minstrel_ht')
-for m in sorted(mods): visit(m)
+# USB-пристрій бере драйвер, що зареєструвався першим. Порядок абеткою (out-of-tree 8188eu/8812au/8814au
+# раніше за rtl8xxxu — TL-WN722N v2/v3 лишається за драйвером з injection), а rtl8192cu — в самому кінці:
+# 60 його USB ID (RTL8188CUS/8192CU) знає й rtl8xxxu, і вони лишаються за rtl8xxxu, як було; ще 12 — лише він.
+for m in sorted(mods, key=lambda m: (m == 'rtl8192cu', m)): visit(m)
 open(f'{root}/build/stage/modules.order', 'w').write(''.join(f'{m}.ko\n' for m in order))
 EOF
 M=module/nethunter-kmods
 rm -rf "$M/modules" && cp -r build/stage/modules "$M/modules" && cp build/stage/modules.order "$M/modules.order"
 KREL="$(grep '^kernel_release=' stock/ci_gki-info.txt | cut -d= -f2)"
 echo "$KREL" > "$M/kernel.release"
+# Варіант B (власне ядро NetHunter, kernel-recipe/): оновити gki/ — функції ядра + модулі з
+# config/nh-kernel-only.list; там же перевірка завантаження на цьому ядрі (tools/check_nh_kernel_access.py)
+# лише якщо том зібраного ядра — саме під цю збірку (рецепт прив'язаний до свого ab; після OTA том
+# лишається старим, і тоді модуль іде без gki/, а не падає вся збірка). docker volume inspect — першим:
+# docker run -v мовчки створив би порожній том.
+VOL="${NH_GKI_OUT:-nh-gki-out}"; VREL=""
+docker volume inspect "$VOL" >/dev/null 2>&1 && \
+  VREL="$(docker run --rm -v "$VOL":/out:ro nh-kbuild cat /out/include/config/kernel.release 2>/dev/null || true)"
+# том за старою версією рецепта (до kernel-recipe/extra-exports.txt) має той самий kernel.release —
+# тож ще й звіряємо, що всі додаткові експорти в ньому є
+MISS=""
+[ "$VREL" = "$KREL" ] && MISS="$(docker run --rm -v "$VOL":/out:ro -v "$ROOT/kernel-recipe":/r:ro nh-kbuild bash -c '
+  cut -f2 /out/vmlinux.symvers /out/Module.symvers | sort -u > /tmp/have
+  grep -vE "^\s*(#|$)" /r/extra-exports.txt | sort -u | comm -23 - /tmp/have | tr "\n" " "')"
+if [ -d "kernel/ref-ab$AB/modules" ] && [ "$VREL" = "$KREL" ] && [ -z "$MISS" ]; then
+  NH_REF="kernel/ref-ab$AB" ./tools/add-gki-extras.sh || { echo "NetHunter-kernel part (gki/) failed"; exit 1; }
+else
+  rm -rf "$M/gki"
+  echo "No NetHunter kernel build for $KREL (volume $VOL: ${VREL:-none}; kernel/ref-ab$AB/modules: $([ -d kernel/ref-ab$AB/modules ] && echo yes || echo no)) - module ships without the gki/ part"
+  [ -z "$MISS" ] || echo "  the kernel build predates kernel-recipe/extra-exports.txt (missing: $MISS) - rebuild it: kernel-recipe/build-gki.sh all"
+  [ -z "$(ls build/stage/modules-nh 2>/dev/null)" ] || echo "  (skipped: $(ls build/stage/modules-nh | tr '\n' ' '))"
+fi
 ZIP="out/nethunter-kmods-metroid-ab$AB.zip"
 rm -f "$ZIP" && (cd "$M" && zip -qr9 "$ROOT/$ZIP" . -x '.*')
 shasum -a 256 "$ZIP"

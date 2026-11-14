@@ -4,6 +4,8 @@ rc80211_minstrel_ht.ko
 8814au.ko
 ath.ko
 ath3k.ko
+ath6kl_core.ko
+ath6kl_usb.ko
 ath9k_hw.ko
 ath9k_common.ko
 ath9k_htc.ko
@@ -48,7 +50,10 @@ rt2800lib.ko
 rt2800usb.ko
 rt73usb.ko
 rtl8187.ko
+rtlwifi.ko
+rtl8192c-common.ko
 rtl8xxxu.ko
+rtl_usb.ko
 rtw88_core.ko
 rtw88_8723d.ko
 rtw88_usb.ko
@@ -60,3 +65,5 @@ rtw88_8822bu.ko
 smsc.ko
 smsc95xx.ko
 usb_8dev.ko
+zd1201.ko
+rtl8192cu.ko

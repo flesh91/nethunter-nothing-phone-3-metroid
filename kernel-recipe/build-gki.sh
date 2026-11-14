@@ -46,7 +46,10 @@ check_src() {
 stage_config() {
   say "config: stock ikconfig (ab15756704) + nethunter.config + SIG_PROTECT off"
   # Google's export list for this build; the stock config names it relative to srctree.
+  # + extra-exports.txt: vmlinux functions Google keeps unexported (TRIM_UNUSED_KSYMS) that USB Wi-Fi
+  # modules from the module pipeline need. Only new exports: every stock symbol and CRC stay as-is.
   cp "$REF/abi_symbollist.raw" "$SRC/abi_symbollist.raw"
+  [ -f "$R/extra-exports.txt" ] && grep -vE '^\s*(#|$)' "$R/extra-exports.txt" >> "$SRC/abi_symbollist.raw"
   printf '%s' "$LOCALVER_FILE" > "$OUT/localversion"
   cp "$REF/stock.config" "$OUT/.config"
   cat > "$OUT/nh-overrides.config" <<'EOF'

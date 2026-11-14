@@ -20,7 +20,7 @@ set_perm "$MODPATH/system/bin/nh-gki" 0 2000 0755
 # Додаткові функції власного ядра NetHunter (варіант B): активні лише на ньому, на стоковому — сплять
 if [ -f "$MODPATH/gki/kernel.version" ]; then
   if [ "$(cat /proc/version)" = "$(cat "$MODPATH/gki/kernel.version")" ]; then
-    ui_print "- NetHunter kernel detected: its extra modules (CAN, BT PAN, USB-net, NFC, NFS...) load after boot"
+    ui_print "- NetHunter kernel detected: its extra modules (CAN, BT PAN, USB-net, NFC, NFS, old USB Wi-Fi...) load after boot"
     ui_print "  (disable: su -c nh-gki autoload off)"
   else
     ui_print "- Stock kernel: NetHunter-kernel features stay idle (they need nethunter-boot.img)"

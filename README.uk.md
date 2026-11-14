@@ -22,11 +22,12 @@
 | Конфіг ядра (`/proc/config.gz`) відтворено з вихідників ACK `@f0987337fa35` | ідентичний (крім рядка версії компілятора) |
 | KMI: CRC усіх 9535 експортованих символів vmlinux + GKI-модулів після додавання драйверів | **0 розбіжностей** з `Module.symvers` Google |
 | Wi-Fi стек Qualcomm (`cfg80211.ko`, `mac80211.ko` з `vendor_dlkm` пристрою) | CRC збігаються: 111/111 і 74/74 |
-| Симуляція правил завантаження GKI (`resolve_symbol()`, protected exports, дублікати) для кожного модуля | **62/62 проходять** |
+| Симуляція правил завантаження GKI (`resolve_symbol()`, protected exports, дублікати) для кожного модуля | **69/69 проходять** |
+| Те саме для ядра NetHunter (варіант B), з CRC: `gki/`, стокова частина і модулі Google поверх наших батьківських копій | **114/114 проходять** |
 
 Ключова знахідка: `cfg80211`/`mac80211` на пристрої — Qualcomm, а не Google. Заголовки збігаються з ACK, але конфіг інший: `CONFIG_NL80211_TESTMODE=y` (інакше CRC `wiphy_new_nm`/`ieee80211_alloc_hw_nm` не збігаються і драйвери не вантажаться) і `CONFIG_MAC80211_RC_MINSTREL` **вимкнено** (у mac80211 Qualcomm немає rate control, тож USB-адаптери не стартують). Тому `minstrel_ht` зібрано окремим модулем і зроблено типовим при завантаженні. Джерело для звірки: [NothingOSS/android_kernel_msm-6.6_nothing_sm8735](https://github.com/NothingOSS/android_kernel_msm-6.6_nothing_sm8735), гілка `sm8735/b/mr`, `arch/arm64/configs/vendor/sun_perf.config`.
 
-**Необов'язковий варіант B — власне ядро NetHunter.** Те, чого модуль на стоковому ядрі дати не може (CAN ISO-TP/J1939, BNEP, USB RNDIS/QMI/MBIM, RNDIS-гаджет), дає власне boot-ядро: те саме ядро Google, зібране з того самого коміту ACK і стокового конфігу, з KMI, ідентичним збірці Google. Модуль лишається тим самим і сам вмикає ці функції, коли працює це ядро — див. [Варіант B](#варіант-b-власне-ядро-nethunter-необовязково).
+**Необов'язковий варіант B — власне ядро NetHunter.** Те, чого модуль на стоковому ядрі дати не може (CAN ISO-TP/J1939, BNEP, USB RNDIS/QMI/MBIM, RNDIS-гаджет, старі USB Wi-Fi AR9170/ZD1211/Broadcom 4320), дає власне boot-ядро: те саме ядро Google, зібране з того самого коміту ACK і стокового конфігу, з KMI, ідентичним збірці Google. Модуль лишається тим самим і сам вмикає ці функції, коли працює це ядро — див. [Варіант B](#варіант-b-власне-ядро-nethunter-необовязково).
 
 ---
 
@@ -38,7 +39,7 @@
 
 | Функція | Стан | Примітка |
 |---|---|---|
-| 62 драйвери вантажаться у стокове ядро | ✅ | `loaded=62 failed=0`, без помилок ядра, автозавантаження при старті |
+| 69 драйверів вантажаться у стокове ядро | ✅ | `loaded=69 failed=0` при старті (разом із новими `zd1201`, `rtl8192cu`, `ath6kl`), без помилок ядра |
 | Вбудований Bluetooth як Linux `hci0` (`nh-bt` + `nh-btbridge`) | ✅ | класичне сканування + LE; працює під SELinux Enforcing |
 | **Monitor mode** вбудованого Wi-Fi (`nh-wlan`) | ✅ | захоплення на 2.4/5 ГГц, перемикання каналів; зі стоковим драйвером лише приймання |
 | **Packet injection** на вбудованому Wi-Fi (`nh-wlan-driver`) | ✅ | перезібраний драйвер Wi-Fi, що підміняється автоматично після старту, **ядро так само стокове**: `aireplay-ng --test` 30/30 на 2.4 і 5 ГГц, deauth і захоплення WPA2 handshake на 5 ГГц, рівне приймання в моніторі — див. [wlan-inject](wlan-inject/README.uk.md) |
@@ -50,7 +51,7 @@
 
 ### Зібрано, із залізом ще не перевірено (🟡)
 
-Інші зовнішні USB Wi-Fi адаптери (усі чипсети нижче, крім AR9271), USB Bluetooth-донгли, USB-serial/UART адаптери, CAN-адаптери, USB-Ethernet. Драйвери і 77 файлів прошивок у модулі є, їх просто ще не випробувано на реальному залізі.
+Інші зовнішні USB Wi-Fi адаптери (усі чипсети нижче, крім AR9271), USB Bluetooth-донгли, USB-serial/UART адаптери, CAN-адаптери, USB-Ethernet. Драйвери і 92 файли прошивок у модулі є, їх просто ще не випробувано на реальному залізі.
 
 **Підтримувані USB Wi-Fi адаптери:**
 
@@ -65,8 +66,24 @@
 | MediaTek MT7601U / MT7663U | `mt7601u` / `mt7663u` | дешеві MT7601 донгли |
 | Realtek RTL8812AU/8814AU/8188EUS | `8812au` / `8814au` / `8188eu` (out-of-tree) | Alfa AWUS036ACH / AWUS1900, TL-WN722N v2/v3 |
 | Realtek RTL8822BU/8821CU/8723DU, 8xxx | `rtw88_*u`, `rtl8xxxu` | TP-Link Archer T3U/T2U |
+| Realtek RTL8188CUS/8192CU | `rtl8xxxu` (типово) або `rtl8192cu` | nano-донгли RTL8188CUS (Edimax EW-7811Un) |
+| Atheros AR6004 (USB) | `ath6kl_usb` | FullMAC: лише клієнт, без monitor mode |
+| ZyDAS ZD1201 | `zd1201` | старі 802.11b-донгли; прошивку кладете самі (нижче) |
+| Atheros AR9170, ZyDAS ZD1211/ZD1211B, Broadcom 4320 (RNDIS) | `carl9170`, `zd1211rw`, `rndis_wlan` | **лише з ядром NetHunter** ([варіант B](#варіант-b-власне-ядро-nethunter-необовязково)) |
 
 **Який адаптер узяти:** Alfa **AWUS036ACM** (MT7612U) або **AWUS036ACHM** (MT7610U) — драйвери в ядрі, стабільний monitor + injection, 2.4/5 ГГц. Для 2.4 ГГц і максимальної сумісності з інструментами — **AWUS036NHA** (AR9271).
+
+**RTL8188CUS/8192CU:** `rtl8xxxu` і `rtl8192cu` мають 60 спільних USB ID, а адаптер бере драйвер, що завантажився першим: для цих 60 це `rtl8xxxu`, як і до появи `rtl8192cu`. Ще 12 ID знає лише `rtl8192cu` — такі адаптери одразу йдуть до нього. Переключити адаптер на `rtl8192cu` — спершу знайти його інтерфейс (вигляду `1-1:1.0`):
+
+```bash
+ls /sys/bus/usb/drivers/rtl8xxxu/ | grep :
+```
+
+```bash
+echo 1-1:1.0 > /sys/bus/usb/drivers/rtl8xxxu/unbind; echo 1-1:1.0 > /sys/bus/usb/drivers/rtl8192cu/bind
+```
+
+**ZD1201:** прошивки немає в linux-firmware, а архів проєкту не вказує ліцензії, тож модуль її не постачає. Візьміть `zd1201-0.14-fw.tar.gz` з [linux-lc100020](https://sourceforge.net/projects/linux-lc100020/files/) і покладіть `zd1201.fw` (та `zd1201-ap.fw` для режиму точки доступу) у `/data/adb/modules/nethunter-kmods/firmware/`.
 
 **Із зовнішнім адаптером:** працюйте на `wlan1` і не чіпайте `wlan0` — не запускайте `airmon-ng check kill`, він може вимкнути власний Wi-Fi телефона. Поки `airodump-ng` тримає канал, запускайте `aireplay-ng` з `--ignore-negative-one`, інакше він чекає бікона на «channel -1» і нічого не надсилає.
 
@@ -81,7 +98,7 @@
 | RNDIS-гаджет (BadUSB-мережа) | не ввімкнено в стоковому конфігу | ECM-гаджет | 🟡 вбудовано в ядро, не перевіряли |
 | BT-адаптер `bpa10x`, NFC PN533 (USB), USB CAN Kvaser/EMS/ESD/UCAN | не ввімкнено в стоковому конфігу | — | 🟡 вантажаться, із залізом не перевіряли |
 | NFS клієнт і сервер | не ввімкнено в стоковому конфігу | — | ✅ `nfs`/`nfs4`/`nfsd` у ядрі (у Kali потрібні `nfs-common` / `nfs-kernel-server`) |
-| USB Wi-Fi `carl9170`, `zd1211rw`, `zd1201`, `rtl8192cu`, `ath6kl`, `rndis_wlan` | потребують `mac80211` — на цьому телефоні він від Qualcomm | — | не в ядрі: лише модулем (ще не додано) |
+| USB Wi-Fi `carl9170` (AR9170), `zd1211rw` (ZD1211), `rndis_wlan` (Broadcom 4320) | потрібні функції USB і `usbnet`, які Google вирізав з ядра та `usbnet.ko` (поза KMI) | інші чипсети з таблиці вище | 🟡 вантажаться самі при старті ядра NetHunter, із залізом не перевіряли |
 
 ---
 
@@ -147,6 +164,7 @@ adb shell su -c "nh-wlan-driver status"   # очікувано: driver: injectio
 | USB-net host RNDIS / QMI / MBIM / DM9601 / MCS7830 | 🟡 вантажаться |
 | NFC-зчитувачі PN533/PN532 (USB) | 🟡 вантажаться |
 | RNDIS-гаджет (BadUSB-мережа) | 🟡 вбудовано |
+| USB Wi-Fi AR9170 (`carl9170`), ZD1211 (`zd1211rw`), Broadcom 4320 (`rndis_wlan`) | 🟡 вантажаться |
 
 **Спершу — без прошивки.** Ядро завантажується в пам'ять один раз; будь-яке перезавантаження повертає стокове:
 
@@ -173,7 +191,7 @@ fastboot flash boot_b nethunter-boot.img
 
 Повернути стокове: `fastboot flash boot_b boot.img` (слот — ваш поточний). Magisk живе в `init_boot` і лишається. Перед оновленням Nothing OS поверніть стоковий `boot.img`.
 
-**Модуль той самий** (v6+): на стоковому ядрі ці функції сплять, на ядрі NetHunter `nh-gki` вантажить їх після старту — разом із власними `can.ko`/`cdc_ncm.ko`/`nfc.ko` замість гуглівських (у тих вирізано експорти, потрібні J1939, MBIM і PN533; якщо наш не завантажиться — повертається гуглівський). Вимкнути: `nh-gki autoload off`.
+**Модуль той самий** (v6+; модуль і `nethunter-boot.img` беріть з одного релізу — модуль упізнає ядро за точним `/proc/version`): на стоковому ядрі ці функції сплять, на ядрі NetHunter `nh-gki` вантажить їх після старту — разом із власними `can.ko`/`cdc_ncm.ko`/`nfc.ko`/`usbnet.ko` замість гуглівських (у тих вирізано експорти, потрібні J1939, MBIM, PN533 і `rndis_wlan`; якщо наш не завантажиться — повертається гуглівський). Для старих USB Wi-Fi ядро NetHunter ще й лишає кілька експортів, які Google вирізає ([extra-exports.txt](kernel-recipe/extra-exports.txt)): це лише нові експорти, KMI не змінюється. Вимкнути: `nh-gki autoload off`.
 
 Ціна: у цьому ядрі вимкнено `CONFIG_MODULE_SIG_PROTECT` — інакше модулі Google з `system_dlkm`, підписані чужим для цього ядра ключем, втратили б доступ до захищених символів. Тож модулі Google вантажаться як «непідписані» (ядро позначається taint `E`), а GKI-захист символів не застосовується.
 
@@ -188,7 +206,7 @@ fastboot flash boot_b nethunter-boot.img
 | `nh-kmod load \| unload \| status \| autoload on\|off` | завантажити/вивантажити драйвери, показати стан |
 | `nh-wlan monitor [канал] \| managed \| channel N \| status` | monitor mode вбудованого Wi-Fi (типово канал 6 — **обов'язковий**, без каналу монітор мертвий) |
 | `nh-wlan-driver swap \| restore \| status \| autoswap on\|off` | підмінити драйвер вбудованого Wi-Fi на збірку з injection або повернути стоковий (підміняється автоматично при старті) |
-| `nh-gki load \| unload \| status \| autoload on\|off` | функції ядра NetHunter (варіант B): CAN ISO-TP/J1939 і USB CAN-адаптери, BT PAN, USB-net, NFC PN533, NFS; на стоковому ядрі нічого не робить |
+| `nh-gki load \| unload \| status \| autoload on\|off` | функції ядра NetHunter (варіант B): CAN ISO-TP/J1939 і USB CAN-адаптери, BT PAN, USB-net, NFC PN533, NFS, USB Wi-Fi AR9170/ZD1211/Broadcom 4320; на стоковому ядрі нічого не робить |
 | `nh-bt start \| stop \| status \| install-bluebinder` | вбудований Bluetooth як `hci0` через AIDL-міст |
 | `nh-fix-nethunter boot \| cache \| commands \| su \| check` | фікси NetHunter нижче |
 
@@ -235,9 +253,9 @@ wlan-inject/              як зібрати цей драйвер: дельт�
 kernel-recipe/            варіант B: власне ядро NetHunter — збірка з коміту ACK, перевірка KMI проти Google, boot.img, тест на пристрої
 btbridge/nh-btbridge.c    Міст AIDL Bluetooth HAL ↔ /dev/vhci  (+ build.sh)
 patches/                  5 мінімальних патчів драйверів, по одному файлу, кожен пояснено
-config/                   фрагмент конфігу ядра: що додано і що неможливо та чому
+config/                   фрагмент конфігу ядра: що додано і що неможливо та чому; nh-kernel-only.list — модулі лише для ядра NetHunter
 oot/                      модуль minstrel_ht + наш клей для out-of-tree Realtek-драйверів
-tools/                    build-all.sh, fetch-*.sh, check_gki_access.py (симулятор завантаження GKI), kocrc.py, add-wlan-inject.sh
+tools/                    build-all.sh, fetch-*.sh, check_gki_access.py (симулятор завантаження GKI), check_nh_kernel_access.py (те саме для ядра NetHunter, з CRC), add-gki-extras.sh, kocrc.py, add-wlan-inject.sh
 docker/                   образ збірки clang-18 arm64
 ```
 
@@ -251,7 +269,7 @@ Magisk → *Modules* → видалити `nethunter-kmods` (і NetHunter) → R
 
 - Скрипти, патчі, `nh-btbridge.c` і обгортка minstrel — **GPL-2.0** (похідні від ядра), див. [LICENSE](LICENSE).
 - Репозиторій **не** містить: пропрієтарних образів Nothing, бінарників ядра Google, системних бібліотек пристрою, жодних прошивкових блобів. Збірка підтягує їх з першоджерел; `fetch-devlibs.sh` бере бібліотеки для лінкування з вашого ж пристрою.
-- Release-zip містить прошивки з [linux-firmware](https://gitlab.com/kernel-firmware/linux-firmware) під їхніми вендорськими ліцензіями (див. `WHENCE` того проєкту).
+- Release-zip містить прошивки з [linux-firmware](https://gitlab.com/kernel-firmware/linux-firmware) під їхніми вендорськими ліцензіями (див. `WHENCE` того проєкту; тексти ліцензій — у `firmware/LICENSES/` модуля) і прошивку ZD1211 (GPL-2.0, з пакета Debian [zd1211-firmware](https://deb.debian.org/debian/pool/non-free-firmware/z/zd1211-firmware/), `firmware/zd1211/`).
 - `wlan-inject/patches/` змінює джерела Qualcomm qcacld-3.0 / qca-wifi-host-cmn / fw-api і зберігає їхню ліцензію ISC; монітор та injection — робота [Loukious](https://github.com/Loukious/vendor_qcom_opensource_wlan), дельта версій — з CodeLinaro. Походження кожного файла: [wlan-inject/README.uk.md](wlan-inject/README.uk.md).
 - Out-of-tree Wi-Fi драйвери — окремі проєкти: [morrownr/8812au-20210820](https://github.com/morrownr/8812au-20210820), [morrownr/8814au](https://github.com/morrownr/8814au), [aircrack-ng/rtl8188eus](https://github.com/aircrack-ng/rtl8188eus).
 

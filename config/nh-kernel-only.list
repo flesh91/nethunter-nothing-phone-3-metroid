@@ -1,0 +1,18 @@
+# Модулі конвеєра (tools/build-all.sh), яким потрібне власне ядро NetHunter (варіант B, kernel-recipe/).
+# На стоковому GKI вони не завантажаться: потрібні експорти, які Google вирізав (TRIM_UNUSED_KSYMS) або
+# захистив (MODULE_SIG_PROTECT). Наше ядро ці експорти лишає (kernel-recipe/extra-exports.txt).
+# build-all.sh не пакує їх у modules/ (стоковий симулятор check_gki_access.py їх не перевіряє), а кладе в
+# build/stage/modules-nh; tools/add-gki-extras.sh переносить їх у gki/, де їх вантажить nh-gki — лише на
+# ядрі NetHunter. Перевірка для цього ядра — tools/check_nh_kernel_access.py (імена + CRC).
+# «!ім'я» — модуль, який дає саме ядро NetHunter (gki/): збірку конвеєра не пакуємо взагалі.
+
+# Atheros AR9170 (usb_poison_anchored_urbs, usb_unpoison_anchored_urbs, usb_wait_anchor_empty_timeout;
+# usb_check_int_endpoints на стоку protected)
+carl9170
+# ZyDAS ZD1211/ZD1211B (usb_wait_anchor_empty_timeout)
+zd1211rw
+# Broadcom 4320 USB (usbnet_pause_rx/resume_rx/purge_paused_rxq у гуглівському usbnet.ko вирізано;
+# rndis_host на стоку не вантажиться — usbnet_cdc_unbind protected)
+rndis_wlan
+# rndis_host збирається тут лише як залежність rndis_wlan; ядро NetHunter дає власний (gki/)
+!rndis_host

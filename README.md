@@ -22,11 +22,12 @@ Compatibility is proven against real artifacts, not by trial and error:
 | Device kernel config (`/proc/config.gz`) reproduced from ACK source `@f0987337fa35` | identical (except compiler version string) |
 | KMI: CRC of all 9535 exported vmlinux + GKI-module symbols after adding the drivers | **0 differences** vs Google's `Module.symvers` |
 | Qualcomm Wi-Fi stack (`cfg80211.ko`, `mac80211.ko` from the device `vendor_dlkm`) | CRCs match: 111/111 and 74/74 |
-| Simulated GKI load rules (`resolve_symbol()`, protected exports, duplicates) per module | **62/62 pass** |
+| Simulated GKI load rules (`resolve_symbol()`, protected exports, duplicates) per module | **69/69 pass** |
+| The same for the NetHunter kernel (variant B), with CRCs: `gki/`, the stock part, and Google modules on top of our parent copies | **114/114 pass** |
 
 Key finding: `cfg80211`/`mac80211` on the device are Qualcomm's, not Google's. Their headers match ACK but the config differs — `CONFIG_NL80211_TESTMODE=y` (otherwise `wiphy_new_nm`/`ieee80211_alloc_hw_nm` CRCs mismatch and drivers refuse to load) and `CONFIG_MAC80211_RC_MINSTREL` is **off** (Qualcomm's mac80211 has no rate-control algorithm, so USB adapters won't start). `minstrel_ht` is therefore built as a standalone module and made the default at load time. Reference: [NothingOSS/android_kernel_msm-6.6_nothing_sm8735](https://github.com/NothingOSS/android_kernel_msm-6.6_nothing_sm8735), branch `sm8735/b/mr`, `arch/arm64/configs/vendor/sun_perf.config`.
 
-**Optional variant B — the NetHunter kernel.** What a module on the stock kernel cannot add (CAN ISO-TP/J1939, BNEP, USB RNDIS/QMI/MBIM, RNDIS gadget) comes from an own boot kernel: the same Google kernel, built from the same ACK commit and the stock config, with a KMI identical to Google's build. The module stays the same and turns these features on by itself when that kernel runs — see [Variant B](#variant-b-the-nethunter-kernel-optional).
+**Optional variant B — the NetHunter kernel.** What a module on the stock kernel cannot add (CAN ISO-TP/J1939, BNEP, USB RNDIS/QMI/MBIM, RNDIS gadget, old USB Wi-Fi AR9170/ZD1211/Broadcom 4320) comes from an own boot kernel: the same Google kernel, built from the same ACK commit and the stock config, with a KMI identical to Google's build. The module stays the same and turns these features on by itself when that kernel runs — see [Variant B](#variant-b-the-nethunter-kernel-optional).
 
 ---
 
@@ -38,7 +39,7 @@ Legend: ✅ verified live on the device · 🟡 built & loads, not exercised wit
 
 | Feature | Status | Notes |
 |---|---|---|
-| 62 driver modules load into the stock kernel | ✅ | `loaded=62 failed=0`, no kernel errors, autoloads on boot |
+| 69 driver modules load into the stock kernel | ✅ | `loaded=69 failed=0` on boot (including the new `zd1201`, `rtl8192cu`, `ath6kl`), no kernel errors |
 | Built-in Bluetooth as Linux `hci0` (`nh-bt` + `nh-btbridge`) | ✅ | classic inquiry + LE scan; works under SELinux Enforcing |
 | Built-in Wi-Fi **monitor mode** (`nh-wlan`) | ✅ | capture on 2.4/5 GHz, channel switching; receive-only with the stock driver |
 | Built-in Wi-Fi **packet injection** (`nh-wlan-driver`) | ✅ | the Wi-Fi driver rebuilt and swapped in automatically after boot, **still no custom kernel**: `aireplay-ng --test` 30/30 on 2.4 and 5 GHz, deauth + WPA2 handshake capture on 5 GHz, steady monitor RX — see [wlan-inject](wlan-inject/README.md) |
@@ -50,7 +51,7 @@ Legend: ✅ verified live on the device · 🟡 built & loads, not exercised wit
 
 ### Built, not yet hardware-tested (🟡)
 
-Other external USB Wi-Fi adapters (every chipset below except AR9271), USB Bluetooth dongles, USB-serial/UART adapters, CAN adapters, USB-Ethernet. Drivers and 77 firmware files are in the module; they just haven't been exercised with the physical hardware yet.
+Other external USB Wi-Fi adapters (every chipset below except AR9271), USB Bluetooth dongles, USB-serial/UART adapters, CAN adapters, USB-Ethernet. Drivers and 92 firmware files are in the module; they just haven't been exercised with the physical hardware yet.
 
 **USB Wi-Fi adapters covered:**
 
@@ -65,8 +66,24 @@ Other external USB Wi-Fi adapters (every chipset below except AR9271), USB Bluet
 | MediaTek MT7601U / MT7663U | `mt7601u` / `mt7663u` | cheap MT7601 dongles |
 | Realtek RTL8812AU/8814AU/8188EUS | `8812au` / `8814au` / `8188eu` (out-of-tree) | Alfa AWUS036ACH / AWUS1900, TL-WN722N v2/v3 |
 | Realtek RTL8822BU/8821CU/8723DU, 8xxx | `rtw88_*u`, `rtl8xxxu` | TP-Link Archer T3U/T2U |
+| Realtek RTL8188CUS/8192CU | `rtl8xxxu` (default) or `rtl8192cu` | RTL8188CUS nano dongles (Edimax EW-7811Un) |
+| Atheros AR6004 (USB) | `ath6kl_usb` | FullMAC: client only, no monitor mode |
+| ZyDAS ZD1201 | `zd1201` | old 802.11b dongles; bring your own firmware (below) |
+| Atheros AR9170, ZyDAS ZD1211/ZD1211B, Broadcom 4320 (RNDIS) | `carl9170`, `zd1211rw`, `rndis_wlan` | **NetHunter kernel only** ([variant B](#variant-b-the-nethunter-kernel-optional)) |
 
 **Recommended adapter if you don't have one:** Alfa **AWUS036ACM** (MT7612U) or **AWUS036ACHM** (MT7610U) — in-kernel drivers, stable monitor + injection, 2.4/5 GHz. For 2.4 GHz and maximum tool compatibility, **AWUS036NHA** (AR9271).
+
+**RTL8188CUS/8192CU:** `rtl8xxxu` and `rtl8192cu` share 60 USB IDs, and an adapter goes to whichever driver loaded first: for those 60 that is `rtl8xxxu`, as before `rtl8192cu` was added. Another 12 IDs only `rtl8192cu` knows — such adapters go straight to it. To move an adapter to `rtl8192cu`, find its interface first (looks like `1-1:1.0`):
+
+```bash
+ls /sys/bus/usb/drivers/rtl8xxxu/ | grep :
+```
+
+```bash
+echo 1-1:1.0 > /sys/bus/usb/drivers/rtl8xxxu/unbind; echo 1-1:1.0 > /sys/bus/usb/drivers/rtl8192cu/bind
+```
+
+**ZD1201:** its firmware is not in linux-firmware and the project archive states no license, so the module does not ship it. Get `zd1201-0.14-fw.tar.gz` from [linux-lc100020](https://sourceforge.net/projects/linux-lc100020/files/) and put `zd1201.fw` (and `zd1201-ap.fw` for access-point mode) into `/data/adb/modules/nethunter-kmods/firmware/`.
 
 **With an external adapter:** work on `wlan1` and leave `wlan0` alone — skip `airmon-ng check kill`, it can take down the phone's own Wi-Fi. While `airodump-ng` holds the channel, run `aireplay-ng` with `--ignore-negative-one`; otherwise it waits for a beacon on "channel -1" and sends nothing.
 
@@ -81,7 +98,7 @@ Other external USB Wi-Fi adapters (every chipset below except AR9271), USB Bluet
 | RNDIS gadget (BadUSB networking) | not enabled in the stock config | ECM gadget | 🟡 built in, not exercised |
 | BT adapter `bpa10x`, NFC PN533 (USB), USB CAN Kvaser/EMS/ESD/UCAN | not enabled in the stock config | — | 🟡 load, not exercised with hardware |
 | NFS client and server | not enabled in the stock config | — | ✅ `nfs`/`nfs4`/`nfsd` in the kernel (Kali needs `nfs-common` / `nfs-kernel-server`) |
-| USB Wi-Fi `carl9170`, `zd1211rw`, `zd1201`, `rtl8192cu`, `ath6kl`, `rndis_wlan` | need `mac80211` — Qualcomm's on this phone | — | not in the kernel: module only (not added yet) |
+| USB Wi-Fi `carl9170` (AR9170), `zd1211rw` (ZD1211), `rndis_wlan` (Broadcom 4320) | need USB and `usbnet` functions Google trims from the kernel and `usbnet.ko` (outside the KMI) | other chipsets from the table above | 🟡 load by themselves when the NetHunter kernel boots, not exercised with hardware |
 
 ---
 
@@ -147,6 +164,7 @@ An own boot kernel — **the same Google GKI kernel**, built from the same ACK c
 | USB-net host RNDIS / QMI / MBIM / DM9601 / MCS7830 | 🟡 load |
 | NFC readers PN533/PN532 (USB) | 🟡 load |
 | RNDIS gadget (BadUSB networking) | 🟡 built in |
+| USB Wi-Fi AR9170 (`carl9170`), ZD1211 (`zd1211rw`), Broadcom 4320 (`rndis_wlan`) | 🟡 load |
 
 **First, without flashing.** The kernel boots from RAM once; any reboot brings the stock one back:
 
@@ -173,7 +191,7 @@ fastboot flash boot_b nethunter-boot.img
 
 Back to stock: `fastboot flash boot_b boot.img` (use your current slot). Magisk lives in `init_boot` and stays. Restore the stock `boot.img` before a Nothing OS update.
 
-**Same module** (v6+): on the stock kernel these features stay idle; on the NetHunter kernel `nh-gki` loads them after boot, together with our own `can.ko`/`cdc_ncm.ko`/`nfc.ko` in place of Google's (those have the exports J1939, MBIM and PN533 need trimmed away; if ours fails to load, Google's is put back). Disable: `nh-gki autoload off`.
+**Same module** (v6+; take the module and `nethunter-boot.img` from the same release — the module recognises the kernel by its exact `/proc/version`): on the stock kernel these features stay idle; on the NetHunter kernel `nh-gki` loads them after boot, together with our own `can.ko`/`cdc_ncm.ko`/`nfc.ko`/`usbnet.ko` in place of Google's (those have the exports J1939, MBIM, PN533 and `rndis_wlan` need trimmed away; if ours fails to load, Google's is put back). For the old USB Wi-Fi drivers the NetHunter kernel also keeps a few exports Google trims ([extra-exports.txt](kernel-recipe/extra-exports.txt)): new exports only, the KMI does not change. Disable: `nh-gki autoload off`.
 
 Trade-off: this kernel has `CONFIG_MODULE_SIG_PROTECT` off — otherwise Google's `system_dlkm` modules, signed with a key foreign to this kernel, would lose access to protected symbols. So Google's modules load as "unsigned" (the kernel gets taint `E`) and GKI symbol protection is not enforced.
 
@@ -188,7 +206,7 @@ All are in `/system/bin` after a reboot (run by full path before the first reboo
 | `nh-kmod load \| unload \| status \| autoload on\|off` | load/unload the driver set, show state |
 | `nh-wlan monitor [chan] \| managed \| channel N \| status` | built-in Wi-Fi monitor mode (defaults to channel 6 — **required**, monitor is dead without a channel) |
 | `nh-wlan-driver swap \| restore \| status \| autoswap on\|off` | swap the built-in Wi-Fi driver for the injection build, or back to stock (swaps automatically on boot) |
-| `nh-gki load \| unload \| status \| autoload on\|off` | NetHunter-kernel features (variant B): CAN ISO-TP/J1939 and USB CAN adapters, BT PAN, USB-net, NFC PN533, NFS; does nothing on the stock kernel |
+| `nh-gki load \| unload \| status \| autoload on\|off` | NetHunter-kernel features (variant B): CAN ISO-TP/J1939 and USB CAN adapters, BT PAN, USB-net, NFC PN533, NFS, USB Wi-Fi AR9170/ZD1211/Broadcom 4320; does nothing on the stock kernel |
 | `nh-bt start \| stop \| status \| install-bluebinder` | built-in Bluetooth as `hci0` via the AIDL bridge |
 | `nh-fix-nethunter boot \| cache \| commands \| su \| check` | the NetHunter fixes below |
 
@@ -235,9 +253,9 @@ wlan-inject/              how the built-in Wi-Fi driver is built: upstream delta
 kernel-recipe/            variant B: the NetHunter kernel — build from the ACK commit, KMI check against Google, boot.img, on-device test
 btbridge/nh-btbridge.c    AIDL Bluetooth HAL ↔ /dev/vhci bridge  (+ build.sh)
 patches/                  5 minimal driver patches, one file each, each explained
-config/                   kernel config fragment: what is added, and what is impossible and why
+config/                   kernel config fragment: what is added, and what is impossible and why; nh-kernel-only.list — modules for the NetHunter kernel only
 oot/                      minstrel_ht module + our glue for the out-of-tree Realtek drivers
-tools/                    build-all.sh, fetch-*.sh, check_gki_access.py (GKI load simulator), kocrc.py, add-wlan-inject.sh
+tools/                    build-all.sh, fetch-*.sh, check_gki_access.py (GKI load simulator), check_nh_kernel_access.py (the same for the NetHunter kernel, with CRCs), add-gki-extras.sh, kocrc.py, add-wlan-inject.sh
 docker/                   clang-18 arm64 build image
 ```
 
@@ -251,7 +269,7 @@ Magisk → *Modules* → remove `nethunter-kmods` (and NetHunter) → Reboot, th
 
 - Scripts, patches, `nh-btbridge.c` and the minstrel wrapper are **GPL-2.0** (kernel-derived) — see [LICENSE](LICENSE).
 - This repo does **not** contain: Nothing's proprietary partition images, Google's kernel binaries, the device's system libraries, or any firmware blobs. The build fetches these from their sources; `fetch-devlibs.sh` pulls link-time libraries from your own device.
-- Release zips bundle firmware from [linux-firmware](https://gitlab.com/kernel-firmware/linux-firmware) under its respective vendor licenses (see that project's `WHENCE`).
+- Release zips bundle firmware from [linux-firmware](https://gitlab.com/kernel-firmware/linux-firmware) under its respective vendor licenses (see that project's `WHENCE`; the license texts are in the module's `firmware/LICENSES/`) and the ZD1211 firmware (GPL-2.0, from the Debian package [zd1211-firmware](https://deb.debian.org/debian/pool/non-free-firmware/z/zd1211-firmware/), `firmware/zd1211/`).
 - `wlan-inject/patches/` modifies Qualcomm's qcacld-3.0 / qca-wifi-host-cmn / fw-api sources and keeps their ISC license; the monitor/injection work is by [Loukious](https://github.com/Loukious/vendor_qcom_opensource_wlan), the version delta comes from CodeLinaro. Origins per file: [wlan-inject/README.md](wlan-inject/README.md#patches).
 - The out-of-tree Wi-Fi drivers are separate projects: [morrownr/8812au-20210820](https://github.com/morrownr/8812au-20210820), [morrownr/8814au](https://github.com/morrownr/8814au), [aircrack-ng/rtl8188eus](https://github.com/aircrack-ng/rtl8188eus).
 

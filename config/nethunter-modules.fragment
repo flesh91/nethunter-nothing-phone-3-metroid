@@ -16,7 +16,11 @@ CONFIG_MAC80211_RC_DEFAULT=""
 # --- USB Wi-Fi з monitor mode + injection (in-tree) ---
 CONFIG_WLAN_VENDOR_ATH=y
 CONFIG_ATH9K_HTC=m
-# CONFIG_CARL9170 — неможливо на стоковому GKI: старий AR9170; потрібні usb_poison_anchored_urbs та ін. поза KMI
+# CARL9170 (AR9170) — лише з ядром NetHunter: usb_poison_anchored_urbs та ін. поза KMI (config/nh-kernel-only.list)
+CONFIG_CARL9170=m
+# AR6004 USB (FullMAC, без monitor mode)
+CONFIG_ATH6KL=m
+CONFIG_ATH6KL_USB=m
 CONFIG_WLAN_VENDOR_RALINK=y
 CONFIG_RT2X00=m
 CONFIG_RT2500USB=m
@@ -32,6 +36,9 @@ CONFIG_WLAN_VENDOR_REALTEK=y
 CONFIG_RTL8187=m
 CONFIG_RTL8XXXU=m
 CONFIG_RTL8XXXU_UNTESTED=y
+# rtlwifi rtl8192cu (RTL8188CUS/8192CU) — старий драйвер Realtek поруч із rtl8xxxu (той самий USB ID: хто першим прив'яжеться)
+CONFIG_RTL_CARDS=m
+CONFIG_RTL8192CU=m
 CONFIG_RTW88=m
 CONFIG_RTW88_8822BU=m
 CONFIG_RTW88_8821CU=m
@@ -43,8 +50,13 @@ CONFIG_MT76x2U=m
 CONFIG_MT7663U=m
 CONFIG_MT7921U=m
 CONFIG_WLAN_VENDOR_ZYDAS=y
-# CONFIG_ZD1211RW — неможливо на стоковому GKI: старий ZD1211; usb_wait_anchor_empty_timeout поза KMI
+# ZD1211RW — лише з ядром NetHunter: usb_wait_anchor_empty_timeout поза KMI (config/nh-kernel-only.list)
+CONFIG_ZD1211RW=m
+# ZD1201 (802.11b, Wireless Extensions — у стоковому GKI увімкнені). Прошивки zd1201.fw немає в linux-firmware
+CONFIG_USB_ZD1201=m
 CONFIG_EEPROM_93CX6=m
+# Broadcom 4320 USB (RNDIS) — лише з ядром NetHunter: usbnet_pause_rx та ін. вирізані з гуглівського usbnet.ko
+CONFIG_USB_NET_RNDIS_WLAN=m
 
 # --- Bluetooth: USB-донгли + VHCI (bluebinder для вбудованого BT) ---
 CONFIG_BT_HCIBTUSB=m
@@ -66,7 +78,8 @@ CONFIG_USB_SERIAL_OPTION=m
 CONFIG_USB_SERIAL_QUALCOMM=m
 
 # --- USB-мережа ---
-# CONFIG_USB_NET_RNDIS_HOST — неможливо на стоковому GKI: usbnet_cdc_unbind захищений у GKI cdc_ether.ko
+# USB_NET_RNDIS_HOST — неможливо на стоковому GKI: usbnet_cdc_unbind захищений у GKI cdc_ether.ko
+#   (збирається як залежність RNDIS_WLAN, але не пакується: ядро NetHunter має свій, gki/)
 CONFIG_USB_NET_SMSC95XX=m
 # CONFIG_USB_NET_DM9601 — неможливо на стоковому GKI: usbnet_link_change/mii_link_ok захищені у GKI
 # CONFIG_USB_NET_MCS7830 — неможливо на стоковому GKI: usbnet_link_change захищений у GKI

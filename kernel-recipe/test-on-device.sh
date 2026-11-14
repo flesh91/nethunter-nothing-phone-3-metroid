@@ -14,9 +14,10 @@ sh_() { adb shell "su -c '$1'" 2>/dev/null | tr -d '\r'; }
 
 adb get-state >/dev/null 2>&1 || { echo "!! no device"; exit 2; }
 # Let the module's boot scripts finish first. Their logs are written at the END (the Wi-Fi swap ends
-# with a ~20 s settle), so "file exists" is not enough: wait for non-empty logs and no swap marker.
+# with a ~20 s settle), so "file exists" is not enough: wait for logs written during THIS boot (the
+# previous boot's logs stay on disk) - nh-kmod's load.log, gki/boot.log, wlan/boot.log - and no swap marker.
 M=/data/adb/modules/nethunter-kmods
-sh_ "for i in \$(seq 1 180); do { [ ! -f $M/wlan/qca_cld3_wcn7750.ko ] || { [ -s $M/wlan/boot.log ] && [ ! -f $M/wlan/swapping ]; }; } && { [ ! -f $M/gki/kernel.version ] || [ -s $M/gki/boot.log ]; } && break; sleep 1; done" >/dev/null
+sh_ "b=\$(( \$(date +%s) - \$(cut -d. -f1 /proc/uptime) )); fresh() { [ -s \$1 ] && [ \$(stat -c %Y \$1) -ge \$b ]; }; for i in \$(seq 1 300); do { [ ! -f $M/wlan/qca_cld3_wcn7750.ko ] || { fresh $M/wlan/boot.log && [ ! -f $M/wlan/swapping ]; }; } && fresh $M/load.log && { [ ! -f $M/gki/kernel.version ] || fresh $M/gki/boot.log; } && break; sleep 1; done" >/dev/null
 # dmesg lines are compared without their [timestamp]
 nots() { sed 's/^\[[^]]*\] //' "$@"; }
 sh_ "cat /proc/version"                         > "$D/version"
