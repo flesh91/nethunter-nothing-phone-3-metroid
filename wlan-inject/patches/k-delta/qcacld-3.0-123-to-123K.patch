@@ -1,0 +1,1358 @@
+diff --git a/components/action_oui/core/src/wlan_action_oui_main.c b/components/action_oui/core/src/wlan_action_oui_main.c
+index 0c6d074..129951a 100644
+--- a/components/action_oui/core/src/wlan_action_oui_main.c
++++ b/components/action_oui/core/src/wlan_action_oui_main.c
+@@ -219,6 +219,10 @@ static void action_oui_load_config(struct action_oui_psoc_priv *psoc_priv)
+ 		      [ACTION_OUI_DISABLE_DYNAMIC_SMPS],
+ 		      cfg_get(psoc, CFG_ACTION_OUI_DISABLE_DYNAMIC_SMPS),
+ 		      ACTION_OUI_MAX_STR_LEN);
++	qdf_str_lcopy(psoc_priv->action_oui_str
++		      [ACTION_OUI_SKIP_BCN_CH_MISMATCH_CHK],
++		      cfg_get(psoc, CFG_ACTION_OUI_SKIP_BCN_CH_MISMATCH_CHK),
++		      ACTION_OUI_MAX_STR_LEN);
+ }
+ 
+ static void action_oui_parse_config(struct wlan_objmgr_psoc *psoc)
+diff --git a/components/action_oui/dispatcher/inc/wlan_action_oui_cfg.h b/components/action_oui/dispatcher/inc/wlan_action_oui_cfg.h
+index 9fba0ce..8f3d5d9 100644
+--- a/components/action_oui/dispatcher/inc/wlan_action_oui_cfg.h
++++ b/components/action_oui/dispatcher/inc/wlan_action_oui_cfg.h
+@@ -943,6 +943,33 @@
+ 	"F832E4 00 01", \
+ 	"disable dynamic SMPS capability for specified AP")
+ 
++/*
++ * <ini>
++ * CFG_ACTION_OUI_SKIP_BCN_CH_MISMATCH_CHK - Used to skip beacon
++ * frame channel mismatch check for specified AP.
++ *
++ * Default OUIs: (All values in Hex)
++ * OUI 1: 18FE34
++ *   OUI data Len: 00
++ *   Info Mask : 01 - only OUI present in Info mask
++ *
++ * Refer to gEnableActionOUI for more detail about the format.
++ *
++ * Related: gEnableActionOUI
++ *
++ * Supported Feature: Action OUIs
++ *
++ * Usage: External
++ *
++ * </ini>
++ */
++#define CFG_ACTION_OUI_SKIP_BCN_CH_MISMATCH_CHK CFG_INI_STRING( \
++	"gActionOUISkipBcnChMismatchCheck", \
++	0, \
++	ACTION_OUI_MAX_STR_LEN, \
++	"18FE34 00 01", \
++	"skip beacon frame channel mismatch check for specified AP.")
++
+ #define CFG_ACTION_OUI \
+ 	CFG(CFG_ACTION_OUI_CCKM_1X1) \
+ 	CFG(CFG_ACTION_OUI_CONNECT_1X1) \
+@@ -967,5 +994,6 @@
+ 	CFG(CFG_ACTION_OUI_LIMIT_BW) \
+ 	CFG(CFG_ACTION_OUI_DISABLE_AUX_LISTEN) \
+ 	CFG(CFG_ACTION_OUI_DISABLE_DYNAMIC_SMPS) \
++	CFG(CFG_ACTION_OUI_SKIP_BCN_CH_MISMATCH_CHK) \
+ 	CFG(CFG_ENABLE_ACTION_OUI)
+ #endif
+diff --git a/components/action_oui/dispatcher/inc/wlan_action_oui_public_struct.h b/components/action_oui/dispatcher/inc/wlan_action_oui_public_struct.h
+index 3be69b3..5968b20 100644
+--- a/components/action_oui/dispatcher/inc/wlan_action_oui_public_struct.h
++++ b/components/action_oui/dispatcher/inc/wlan_action_oui_public_struct.h
+@@ -130,6 +130,8 @@
+  * @ACTION_OUI_ENABLE_CTS2SELF: enable cts to self for specified AP's
+  * @ACTION_OUI_LIMIT_BW: Limit BW if vendor OUI is received in beacon.
+  * @ACTION_OUI_DISABLE_DYNAMIC_SMPS: Disable Dynamic SMPS for specified AP
++ * @ACTION_OUI_SKIP_BCN_CH_MISMATCH_CHK: skip beacon frame channel mismatch
++ * check for specified AP.
+  * @ACTION_OUI_MAXIMUM_ID: maximum number of action oui types
+  */
+ enum action_oui_id {
+@@ -160,6 +162,7 @@ enum action_oui_id {
+ 
+ 	ACTION_OUI_LIMIT_BW,
+ 	ACTION_OUI_DISABLE_DYNAMIC_SMPS,
++	ACTION_OUI_SKIP_BCN_CH_MISMATCH_CHK,
+ 	ACTION_OUI_MAXIMUM_ID
+ };
+ 
+diff --git a/components/cmn_services/policy_mgr/inc/wlan_policy_mgr_api.h b/components/cmn_services/policy_mgr/inc/wlan_policy_mgr_api.h
+index 944d6e1..fc0a819 100644
+--- a/components/cmn_services/policy_mgr/inc/wlan_policy_mgr_api.h
++++ b/components/cmn_services/policy_mgr/inc/wlan_policy_mgr_api.h
+@@ -6102,6 +6102,44 @@ QDF_STATUS policy_mgr_get_pcl_ch_list_for_ll_sap(
+ 					uint8_t *connection_count);
+ #endif
+ 
++#ifdef WLAN_FEATURE_11BE_MLO
++/**
++ * policy_mgr_get_inact_vdev_present_with_freq() - Get inactive VDEV ID present
++ * with frequency
++ * @psoc: PSOC object information
++ * @freq: Frequency to check
++ * @vdev_id: VDEV ID to check
++ *
++ * This function checks if there is an inactive VDEV ID present with the given
++ * frequency.
++ *
++ * Return: VDEV ID if found, WLAN_UMAC_VDEV_ID_MAX otherwise
++ */
++uint8_t
++policy_mgr_get_inact_vdev_present_with_freq(struct wlan_objmgr_psoc *psoc,
++					    qdf_freq_t freq, uint8_t vdev_id);
++#else
++static inline uint8_t
++policy_mgr_get_inact_vdev_present_with_freq(struct wlan_objmgr_psoc *psoc,
++					    qdf_freq_t freq, uint8_t vdev_id)
++{
++	return WLAN_UMAC_VDEV_ID_MAX;
++}
++#endif
++
++/**
++ * policy_mgr_get_vdev_present_with_freq() - Check if any other  vdev present
++ * with the given freq.
++ * @psoc: pointer to psoc
++ * @freq: given freq
++ * @vdev_id: current vdev id.
++ *
++ * Return: vdev id of the scc vdev
++ */
++uint8_t
++policy_mgr_get_vdev_present_with_freq(struct wlan_objmgr_psoc *psoc,
++				      qdf_freq_t freq, uint8_t vdev_id);
++
+ /**
+  * policy_mgr_mon_sbs_mac0_freq() - Check if the given frequency is
+  * sbs frequency on mac0 for static and dynamic sbs case.
+diff --git a/components/cmn_services/policy_mgr/inc/wlan_policy_mgr_ll_sap.h b/components/cmn_services/policy_mgr/inc/wlan_policy_mgr_ll_sap.h
+index 1a22cf8..8da6464 100644
+--- a/components/cmn_services/policy_mgr/inc/wlan_policy_mgr_ll_sap.h
++++ b/components/cmn_services/policy_mgr/inc/wlan_policy_mgr_ll_sap.h
+@@ -1,5 +1,6 @@
+ /*
+  * Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+  *
+  * Permission to use, copy, modify, and/or distribute this software for any
+  * purpose with or without fee is hereby granted, provided that the above
+@@ -51,6 +52,7 @@ uint8_t wlan_policy_mgr_get_ll_lt_sap_vdev_id(struct wlan_objmgr_psoc *psoc);
+  * __policy_mgr_is_ll_lt_sap_restart_required() - Check in ll_lt_sap restart is
+  * required
+  * @psoc: PSOC object
++ * @ll_lt_sap_start_freq: starting LL LT SAP freq.
+  * @func: Function pointer of the caller function.
+  *
+  * This API checks if ll_lt_sap restart is required or not
+@@ -58,10 +60,32 @@ uint8_t wlan_policy_mgr_get_ll_lt_sap_vdev_id(struct wlan_objmgr_psoc *psoc);
+  * Return: true/false
+  */
+ bool __policy_mgr_is_ll_lt_sap_restart_required(struct wlan_objmgr_psoc *psoc,
++						qdf_freq_t ll_lt_sap_start_freq,
+ 						const char *func);
+ 
+-#define policy_mgr_is_ll_lt_sap_restart_required(psoc) \
+-	__policy_mgr_is_ll_lt_sap_restart_required(psoc, __func__)
++#define policy_mgr_is_ll_lt_sap_restart_required(psoc, ll_sap_freq) \
++	__policy_mgr_is_ll_lt_sap_restart_required(psoc, ll_sap_freq, __func__)
++
++/**
++ * __policy_mgr_is_ll_lt_freq_allowed() - Check if ll_lt_sap given freq
++ * can be allowed
++ * @psoc: PSOC object
++ * @ll_lt_sap_freq: LL LT SAP freq to check
++ * @ll_lt_sap_vdev_id: LL LT SAP vdev id
++ * @func: Function pointer of the caller function.
++ *
++ * This API checks if ll_lt_sap restart is required or not
++ *
++ * Return: true if frequency is allowed, false otherwise
++ */
++bool __policy_mgr_is_ll_lt_freq_allowed(struct wlan_objmgr_psoc *psoc,
++					qdf_freq_t ll_lt_sap_freq,
++					uint8_t ll_lt_sap_vdev_id,
++					const char *func);
++
++#define policy_mgr_is_ll_lt_freq_allowed(psoc, ll_sap_freq, ll_lt_sap_vdev_id) \
++	__policy_mgr_is_ll_lt_freq_allowed(psoc, ll_sap_freq, \
++					ll_lt_sap_vdev_id, __func__)
+ 
+ /**
+  * policy_mgr_ll_lt_sap_restart_concurrent_sap() - Check and restart
+@@ -88,7 +112,16 @@ void policy_mgr_ll_lt_sap_restart_concurrent_sap(struct wlan_objmgr_psoc *psoc,
+ #else
+ 
+ static inline bool
+-policy_mgr_is_ll_lt_sap_restart_required(struct wlan_objmgr_psoc *psoc)
++policy_mgr_is_ll_lt_sap_restart_required(struct wlan_objmgr_psoc *psoc,
++					 qdf_freq_t ll_lt_sap_start_freq)
++{
++	return false;
++}
++
++static inline bool
++policy_mgr_is_ll_lt_freq_allowed(struct wlan_objmgr_psoc *psoc,
++				 qdf_freq_t ll_lt_sap_freq,
++				 uint8_t ll_lt_sap_vdev_id)
+ {
+ 	return false;
+ }
+diff --git a/components/cmn_services/policy_mgr/src/wlan_policy_mgr_action.c b/components/cmn_services/policy_mgr/src/wlan_policy_mgr_action.c
+index 3c234ed..31cc626 100644
+--- a/components/cmn_services/policy_mgr/src/wlan_policy_mgr_action.c
++++ b/components/cmn_services/policy_mgr/src/wlan_policy_mgr_action.c
+@@ -3917,7 +3917,7 @@ void policy_mgr_check_concurrent_intf_and_restart_sap(
+ 		return;
+ 	}
+ 
+-	if (policy_mgr_is_ll_lt_sap_restart_required(psoc)) {
++	if (policy_mgr_is_ll_lt_sap_restart_required(psoc, 0)) {
+ 		restart_sap = true;
+ 		goto sap_restart;
+ 	}
+diff --git a/components/cmn_services/policy_mgr/src/wlan_policy_mgr_get_set_utils.c b/components/cmn_services/policy_mgr/src/wlan_policy_mgr_get_set_utils.c
+index b244aaa..344044b 100644
+--- a/components/cmn_services/policy_mgr/src/wlan_policy_mgr_get_set_utils.c
++++ b/components/cmn_services/policy_mgr/src/wlan_policy_mgr_get_set_utils.c
+@@ -13303,7 +13303,7 @@ bool policy_mgr_is_restart_sap_required(struct wlan_objmgr_psoc *psoc,
+ 	}
+ 
+ 	if (policy_mgr_is_vdev_ll_lt_sap(psoc, vdev_id)) {
+-		if (policy_mgr_is_ll_lt_sap_restart_required(psoc))
++		if (policy_mgr_is_ll_lt_sap_restart_required(psoc, 0))
+ 			return true;
+ 		return false;
+ 	}
+diff --git a/components/cmn_services/policy_mgr/src/wlan_policy_mgr_ll_sap.c b/components/cmn_services/policy_mgr/src/wlan_policy_mgr_ll_sap.c
+index 45dee8b..ac3bc07 100644
+--- a/components/cmn_services/policy_mgr/src/wlan_policy_mgr_ll_sap.c
++++ b/components/cmn_services/policy_mgr/src/wlan_policy_mgr_ll_sap.c
+@@ -42,56 +42,54 @@ uint8_t wlan_policy_mgr_get_ll_lt_sap_vdev_id(struct wlan_objmgr_psoc *psoc)
+ 	return vdev_id_list[0];
+ }
+ 
+-bool __policy_mgr_is_ll_lt_sap_restart_required(struct wlan_objmgr_psoc *psoc,
+-						const char *func)
++bool __policy_mgr_is_ll_lt_freq_allowed(struct wlan_objmgr_psoc *psoc,
++					qdf_freq_t ll_lt_sap_freq,
++					uint8_t ll_lt_sap_vdev_id,
++					const char *func)
+ {
+-	qdf_freq_t ll_lt_sap_freq = 0;
+-	uint8_t scc_vdev_id;
+-	bool is_scc = false;
+-	uint8_t conn_idx = 0;
+-	struct policy_mgr_psoc_priv_obj *pm_ctx;
+-
+-	pm_ctx = policy_mgr_get_context(psoc);
+-	if (!pm_ctx) {
+-		policy_mgr_err("Invalid pm ctx");
++	uint8_t scc_vdev_id, inactive_scc_vdev;
++
++	inactive_scc_vdev = policy_mgr_get_inact_vdev_present_with_freq(psoc,
++							ll_lt_sap_freq,
++							ll_lt_sap_vdev_id);
++	scc_vdev_id = policy_mgr_get_vdev_present_with_freq(psoc,
++							ll_lt_sap_freq,
++							ll_lt_sap_vdev_id);
++
++	if (scc_vdev_id != WLAN_UMAC_VDEV_ID_MAX ||
++	    inactive_scc_vdev != WLAN_UMAC_VDEV_ID_MAX) {
++		policy_mgr_rl_nofl_debug("%s: LL SAP %d with freq %d not allowed as vdev (%d or %d) is scc",
++					 func, ll_lt_sap_vdev_id,
++					 ll_lt_sap_freq, scc_vdev_id,
++					 inactive_scc_vdev);
+ 		return false;
+ 	}
+ 
+-	ll_lt_sap_freq = policy_mgr_get_ll_lt_sap_freq(psoc);
++	return true;
++}
+ 
+-	if (!ll_lt_sap_freq)
+-		return false;
++bool __policy_mgr_is_ll_lt_sap_restart_required(struct wlan_objmgr_psoc *psoc,
++						qdf_freq_t ll_lt_sap_start_freq,
++						const char *func)
++{
++	qdf_freq_t ll_lt_sap_freq = 0;
++	uint8_t ll_lt_sap_vdev_id;
+ 
+-	/*
+-	 * Restart ll_lt_sap if any other interface is present in SCC
+-	 * with LL_LT_SAP.
+-	 */
+-	qdf_mutex_acquire(&pm_ctx->qdf_conc_list_lock);
+-	for (conn_idx = 0; conn_idx < MAX_NUMBER_OF_CONC_CONNECTIONS;
+-	     conn_idx++) {
+-		if (pm_conc_connection_list[conn_idx].mode ==
+-		      PM_LL_LT_SAP_MODE)
+-			continue;
++	ll_lt_sap_freq = policy_mgr_get_ll_lt_sap_freq(psoc);
+ 
+-		if (ll_lt_sap_freq == pm_conc_connection_list[conn_idx].freq) {
+-			scc_vdev_id = pm_conc_connection_list[conn_idx].vdev_id;
+-			is_scc = true;
+-			break;
+-		}
++	/* Check if we have a start freq to validate it during start */
++	if (!ll_lt_sap_freq && ll_lt_sap_start_freq) {
++		ll_lt_sap_freq = ll_lt_sap_start_freq;
++		policy_mgr_debug("LL LT SAP is not UP, validate starting freq %d",
++				 ll_lt_sap_start_freq);
+ 	}
+-	qdf_mutex_release(&pm_ctx->qdf_conc_list_lock);
+ 
+-	if (is_scc) {
+-		uint8_t ll_lt_sap_vdev_id =
+-				wlan_policy_mgr_get_ll_lt_sap_vdev_id(psoc);
+-
+-		policy_mgr_rl_nofl_debug("%s ll_lt_sap vdev %d with freq %d is in scc with vdev %d",
+-					 func, ll_lt_sap_vdev_id,
+-					 ll_lt_sap_freq, scc_vdev_id);
+-		return true;
+-	}
++	if (!ll_lt_sap_freq)
++		return false;
++	ll_lt_sap_vdev_id = wlan_policy_mgr_get_ll_lt_sap_vdev_id(psoc);
+ 
+-	return false;
++	return !__policy_mgr_is_ll_lt_freq_allowed(psoc, ll_lt_sap_freq,
++						   ll_lt_sap_vdev_id, func);
+ }
+ 
+ /**
+diff --git a/components/cmn_services/policy_mgr/src/wlan_policy_mgr_pcl.c b/components/cmn_services/policy_mgr/src/wlan_policy_mgr_pcl.c
+index 3745b4d..f965b93 100644
+--- a/components/cmn_services/policy_mgr/src/wlan_policy_mgr_pcl.c
++++ b/components/cmn_services/policy_mgr/src/wlan_policy_mgr_pcl.c
+@@ -1689,13 +1689,43 @@ static bool policy_mgr_is_6G_chan_valid_for_ll_sap(qdf_freq_t freq)
+ 
+ 	return false;
+ }
++#ifdef WLAN_FEATURE_11BE_MLO
++uint8_t
++policy_mgr_get_inact_vdev_present_with_freq(struct wlan_objmgr_psoc *psoc,
++					    qdf_freq_t freq, uint8_t vdev_id)
++{
++	struct policy_mgr_psoc_priv_obj *pm_ctx;
++	uint32_t i;
++	uint8_t scc_vdev_id = WLAN_UMAC_VDEV_ID_MAX;
+ 
+-static bool
+-policy_mgr_vdev_present_with_freq(struct wlan_objmgr_psoc *psoc,
+-				  qdf_freq_t freq, uint8_t vdev_id)
++	pm_ctx = policy_mgr_get_context(psoc);
++	if (!pm_ctx) {
++		policy_mgr_err("Invalid Context");
++		return false;
++	}
++
++	qdf_mutex_acquire(&pm_ctx->qdf_conc_list_lock);
++	for (i = 0; i < MAX_NUMBER_OF_DISABLE_LINK; i++) {
++		if (pm_disabled_ml_links[i].in_use &&
++		    (pm_disabled_ml_links[i].vdev_id != vdev_id) &&
++		    (pm_disabled_ml_links[i].freq == freq)) {
++			scc_vdev_id = pm_disabled_ml_links[i].vdev_id;
++			break;
++		}
++	}
++	qdf_mutex_release(&pm_ctx->qdf_conc_list_lock);
++
++	return scc_vdev_id;
++}
++#endif
++
++uint8_t
++policy_mgr_get_vdev_present_with_freq(struct wlan_objmgr_psoc *psoc,
++				      qdf_freq_t freq, uint8_t vdev_id)
+ {
+ 	struct policy_mgr_psoc_priv_obj *pm_ctx;
+ 	uint32_t i;
++	uint8_t scc_vdev_id = WLAN_UMAC_VDEV_ID_MAX;
+ 
+ 	pm_ctx = policy_mgr_get_context(psoc);
+ 	if (!pm_ctx) {
+@@ -1705,16 +1735,16 @@ policy_mgr_vdev_present_with_freq(struct wlan_objmgr_psoc *psoc,
+ 
+ 	qdf_mutex_acquire(&pm_ctx->qdf_conc_list_lock);
+ 	for (i = 0; i < MAX_NUMBER_OF_CONC_CONNECTIONS; i++) {
+-		if ((pm_conc_connection_list[i].vdev_id != vdev_id) &&
+-		    (pm_conc_connection_list[i].in_use) &&
++		if (pm_conc_connection_list[i].in_use &&
++		    (pm_conc_connection_list[i].vdev_id != vdev_id) &&
+ 		    (pm_conc_connection_list[i].freq == freq)) {
+-			qdf_mutex_release(&pm_ctx->qdf_conc_list_lock);
+-			return true;
++			scc_vdev_id = pm_conc_connection_list[i].vdev_id;
++			break;
+ 		}
+ 	}
+ 	qdf_mutex_release(&pm_ctx->qdf_conc_list_lock);
+ 
+-	return false;
++	return scc_vdev_id;
+ }
+ 
+ /**
+@@ -1740,6 +1770,8 @@ static QDF_STATUS policy_mgr_pcl_modification_for_ll_lt_sap(
+ 	bool modified_pcl_6_ghz = false;
+ 	bool avoid_list_modified_pcl = false;
+ 	bool skip_scc_modified_pcl = false;
++	bool skip_inactive_scc_modified_pcl = false;
++	uint8_t scc_vdev_id;
+ 
+ 	pm_ctx = policy_mgr_get_context(psoc);
+ 	if (!pm_ctx) {
+@@ -1773,12 +1805,21 @@ static QDF_STATUS policy_mgr_pcl_modification_for_ll_lt_sap(
+ 			continue;
+ 		}
+ 
+-		if (policy_mgr_vdev_present_with_freq(psoc, pcl_channels[i],
+-						      vdev_id)) {
++		scc_vdev_id = policy_mgr_get_vdev_present_with_freq(psoc,
++								pcl_channels[i],
++								vdev_id);
++		if (scc_vdev_id != WLAN_UMAC_VDEV_ID_MAX) {
+ 			skip_scc_modified_pcl = true;
+ 			continue;
+ 		}
+ 
++		scc_vdev_id = policy_mgr_get_inact_vdev_present_with_freq(psoc,
++								pcl_channels[i],
++								vdev_id);
++		if (scc_vdev_id != WLAN_UMAC_VDEV_ID_MAX) {
++			skip_inactive_scc_modified_pcl = true;
++			continue;
++		}
+ 		pcl_list[pcl_len] = pcl_channels[i];
+ 		weight_list[pcl_len++] = pcl_weight[i];
+ 	}
+@@ -1792,9 +1833,9 @@ static QDF_STATUS policy_mgr_pcl_modification_for_ll_lt_sap(
+ 	qdf_mem_copy(pcl_weight, weight_list, pcl_len);
+ 	*len = pcl_len;
+ 
+-	policy_mgr_debug("Modified PCL: 6Ghz %d avoid_list %d skip scc %d",
++	policy_mgr_debug("Modified PCL: 6Ghz %d avoid_list %d scc %d inact scc %d",
+ 			 modified_pcl_6_ghz, avoid_list_modified_pcl,
+-			 skip_scc_modified_pcl);
++			 skip_scc_modified_pcl, skip_inactive_scc_modified_pcl);
+ 
+ 	return QDF_STATUS_SUCCESS;
+ }
+diff --git a/components/dp/core/src/wlan_dp_txrx.c b/components/dp/core/src/wlan_dp_txrx.c
+index 201617d..4b51c21 100644
+--- a/components/dp/core/src/wlan_dp_txrx.c
++++ b/components/dp/core/src/wlan_dp_txrx.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2022-2025 Qualcomm Innovation Center, Inc. All rights reserved.
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+  *
+  * Permission to use, copy, modify, and/or distribute this software for
+  * any purpose with or without fee is hereby granted, provided that the
+@@ -50,6 +50,10 @@
+ #include <hif_napi.h>
+ #endif
+ 
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0))
++#include <net/gro.h>
++#endif
++
+ uint32_t wlan_dp_intf_get_pkt_type_bitmap_value(void *link_ctx)
+ {
+ 	struct wlan_dp_link *dp_link = (struct wlan_dp_link *)link_ctx;
+diff --git a/components/pmo/core/inc/wlan_pmo_main.h b/components/pmo/core/inc/wlan_pmo_main.h
+index ff97a37..5aa7852 100644
+--- a/components/pmo/core/inc/wlan_pmo_main.h
++++ b/components/pmo/core/inc/wlan_pmo_main.h
+@@ -48,6 +48,8 @@
+ #define pmo_nofl_debug(params...) \
+ 	QDF_TRACE_DEBUG_NO_FL(QDF_MODULE_ID_PMO, params)
+ 
++#define pmo_debug_rl(params...) QDF_TRACE_DEBUG_RL(QDF_MODULE_ID_PMO, params)
++
+ #define pmo_enter() QDF_TRACE_ENTER(QDF_MODULE_ID_PMO, "enter")
+ #define pmo_exit() QDF_TRACE_EXIT(QDF_MODULE_ID_PMO, "exit")
+ 
+@@ -385,6 +387,15 @@ pmo_intersect_packet_filter(struct pmo_psoc_priv_obj *psoc_ctx)
+ 		psoc_ctx->caps.packet_filter;
+ }
+ 
++/**
++ * pmo_rate_limit_needed() - check allow or not to set mc addr list
++ * wmi cmd to fw based on pending cmds
++ * @psoc: objmgr psoc
++ *
++ * Return: bool
++ */
++bool pmo_rate_limit_needed(struct wlan_objmgr_psoc *psoc);
++
+ /*
+  * pmo_host_action_on_page_fault() - Returns action host will take on page fault
+  * @psoc: PSOC object manager pointer.
+diff --git a/components/pmo/core/src/wlan_pmo_main.c b/components/pmo/core/src/wlan_pmo_main.c
+index 3ce32f3..f1ef60e 100644
+--- a/components/pmo/core/src/wlan_pmo_main.c
++++ b/components/pmo/core/src/wlan_pmo_main.c
+@@ -550,6 +550,20 @@ uint32_t pmo_get_ssr_frequency_on_pagefault(struct wlan_objmgr_psoc *psoc)
+ 	return pmo_psoc_ctx->psoc_cfg.ssr_frequency_on_pagefault;
+ }
+ 
++bool pmo_rate_limit_needed(struct wlan_objmgr_psoc *psoc)
++{
++	bool rate_limit_needed = false;
++	int pending_cmds = pmo_tgt_psoc_get_pending_cmnds(psoc);
++
++	if (pending_cmds > WMI_MAX_CMDS / 2) {
++		rate_limit_needed = true;
++		pmo_debug_rl("pending_cmds %d max %d", pending_cmds,
++			     WMI_MAX_CMDS);
++	}
++
++	return rate_limit_needed;
++}
++
+ QDF_STATUS pmo_get_vdev_bridge_addr(struct wlan_objmgr_vdev *vdev,
+ 				    struct qdf_mac_addr *bridgeaddr)
+ {
+diff --git a/components/pmo/dispatcher/inc/wlan_pmo_ucfg_api.h b/components/pmo/dispatcher/inc/wlan_pmo_ucfg_api.h
+index 50a7a28..2f248fd 100644
+--- a/components/pmo/dispatcher/inc/wlan_pmo_ucfg_api.h
++++ b/components/pmo/dispatcher/inc/wlan_pmo_ucfg_api.h
+@@ -540,6 +540,15 @@ QDF_STATUS ucfg_pmo_disable_hw_filter_in_fwr(struct wlan_objmgr_vdev *vdev);
+  */
+ uint8_t ucfg_pmo_max_mc_addr_supported(struct wlan_objmgr_psoc *psoc);
+ 
++/**
++ * ucfg_pmo_rate_limit_needed() -  check allow or not to set mc addr list
++ * wmi cmd to fw based on pending cmds
++ * @psoc: objmgr psoc
++ *
++ * Return: bool
++ */
++bool ucfg_pmo_rate_limit_needed(struct wlan_objmgr_psoc *psoc);
++
+ /**
+  * ucfg_pmo_cache_mc_addr_list(): API to cache mc addr list in pmo vdev priv obj
+  * @mc_list_config: list configuration
+@@ -1717,6 +1726,11 @@ ucfg_pmo_cache_mc_addr_list(
+ 	return QDF_STATUS_SUCCESS;
+ }
+ 
++bool ucfg_pmo_rate_limit_needed(struct wlan_objmgr_psoc *psoc)
++{
++	return false;
++}
++
+ static inline QDF_STATUS
+ ucfg_pmo_flush_mc_addr_list(
+ 		struct wlan_objmgr_psoc *psoc,
+diff --git a/components/pmo/dispatcher/src/wlan_pmo_ucfg_api.c b/components/pmo/dispatcher/src/wlan_pmo_ucfg_api.c
+index 2827051..0946cc8 100644
+--- a/components/pmo/dispatcher/src/wlan_pmo_ucfg_api.c
++++ b/components/pmo/dispatcher/src/wlan_pmo_ucfg_api.c
+@@ -260,6 +260,11 @@ ucfg_pmo_ns_addr_scope(uint32_t ipv6_scope)
+ 	return PMO_NS_ADDR_SCOPE_INVALID;
+ }
+ 
++bool ucfg_pmo_rate_limit_needed(struct wlan_objmgr_psoc *psoc)
++{
++	return pmo_rate_limit_needed(psoc);
++}
++
+ QDF_STATUS ucfg_pmo_cache_mc_addr_list(
+ 		struct pmo_mc_addr_list_params *mc_list_config)
+ {
+diff --git a/components/umac/mlme/sap/ll_sap/dispatcher/src/wlan_ll_sap_api.c b/components/umac/mlme/sap/ll_sap/dispatcher/src/wlan_ll_sap_api.c
+index 47cfa69..5720dee 100644
+--- a/components/umac/mlme/sap/ll_sap/dispatcher/src/wlan_ll_sap_api.c
++++ b/components/umac/mlme/sap/ll_sap/dispatcher/src/wlan_ll_sap_api.c
+@@ -298,7 +298,7 @@ qdf_freq_t wlan_get_ll_lt_sap_restart_freq(struct wlan_objmgr_pdev *pdev,
+ 				chan_freq)) {
+ 		*csa_reason = CSA_REASON_UNSAFE_CHANNEL;
+ 		goto get_new_ll_lt_sap_freq;
+-	} else if (policy_mgr_is_ll_lt_sap_restart_required(psoc)) {
++	} else if (policy_mgr_is_ll_lt_sap_restart_required(psoc, chan_freq)) {
+ 		*csa_reason = CSA_REASON_CONCURRENT_STA_CHANGED_CHANNEL;
+ 		goto get_new_ll_lt_sap_freq;
+ 	}
+diff --git a/configs/sun_gki_wcn7760_defconfig b/configs/sun_gki_wcn7760_defconfig
+index f5424bf..9abfd89 100644
+--- a/configs/sun_gki_wcn7760_defconfig
++++ b/configs/sun_gki_wcn7760_defconfig
+@@ -386,3 +386,4 @@ CONFIG_WLAN_AUX_SUPPORT=y
+ CONFIG_WLAN_CHIPSET_STATS=y
+ CONFIG_WLAN_CHIPSET_LOG_MAX_SIZE=y
+ CONFIG_DP_FTM_MODE_SKIP_WBM_RING_INIT=y
++CONFIG_FEATURE_WLAN_ZERO_POWER_SCAN=y
+diff --git a/configs/wcn7750_defconfig b/configs/wcn7750_defconfig
+index 47bc3e7..bc5169d 100644
+--- a/configs/wcn7750_defconfig
++++ b/configs/wcn7750_defconfig
+@@ -913,3 +913,6 @@ CONFIG_WLAN_SUPPORT_LAPB := y
+ CONFIG_WLAN_FEATURE_UL_JITTER := y
+ CONFIG_WLAN_SYNC_TSF_PLUS := y
+ CONFIG_WLAN_SYNC_TSF_TIMER := y
++
++#Enable Zero Power Scan
++CONFIG_FEATURE_WLAN_ZERO_POWER_SCAN := y
+diff --git a/configs/wcn7760_defconfig b/configs/wcn7760_defconfig
+index fdf7326..655e0cc 100644
+--- a/configs/wcn7760_defconfig
++++ b/configs/wcn7760_defconfig
+@@ -945,6 +945,7 @@ CONFIG_WLAN_FEATURE_ROAM_INFO_STATS := y
+ CONFIG_WLAN_MULTI_CHIP_SUPPORT := y
+ CONFIG_WLAN_TX_LATENCY_STATS := y
+ CONFIG_DP_FTM_MODE_SKIP_WBM_RING_INIT := y
++CONFIG_FEATURE_WLAN_ZERO_POWER_SCAN := y
+ 
+ CONFIG_WLAN_CTRL_NAME="wlan"
+ CONFIG_MULTI_IF_NAME="WCN7760"
+diff --git a/core/hdd/src/wlan_hdd_hostapd.c b/core/hdd/src/wlan_hdd_hostapd.c
+index fa51da0..70e8007 100644
+--- a/core/hdd/src/wlan_hdd_hostapd.c
++++ b/core/hdd/src/wlan_hdd_hostapd.c
+@@ -3911,6 +3911,7 @@ int hdd_softap_set_channel_change(struct wlan_hdd_link_info *link_info,
+ 	int32_t keymgmt;
+ 	enum policy_mgr_con_mode pm_con_mode;
+ 	qdf_freq_t ll_sap_freq;
++	bool is_ll_lt_sap_vdev;
+ 
+ 	if (!link_info)
+ 		return -EINVAL;
+@@ -3952,17 +3953,16 @@ int hdd_softap_set_channel_change(struct wlan_hdd_link_info *link_info,
+ 	 * vdev is ll sap.
+ 	 *
+ 	 */
+-	if (policy_mgr_is_vdev_ll_lt_sap(hdd_ctx->psoc,
+-					 wlan_vdev_get_id(sap_ctx->vdev)) &&
++	is_ll_lt_sap_vdev = policy_mgr_is_vdev_ll_lt_sap(hdd_ctx->psoc,
++							 link_info->vdev_id);
++	if (is_ll_lt_sap_vdev &&
+ 	    sap_ctx->csa_reason != CSA_REASON_DCS &&
+ 	    sap_ctx->csa_reason != CSA_REASON_USER_INITIATED) {
+ 		wlan_hdd_set_sap_csa_reason(hdd_ctx->psoc, link_info->vdev_id,
+ 					    CSA_REASON_LL_LT_SAP_EVENT);
+-		hdd_dcs_trigger_csa_for_ll_lt_sap(
+-				hdd_ctx->psoc,
+-				hdd_ctx,
+-				wlan_vdev_get_id(sap_ctx->vdev),
+-				LL_SAP_CSA_CONCURENCY);
++		hdd_dcs_trigger_csa_for_ll_lt_sap(hdd_ctx->psoc, hdd_ctx,
++						  link_info->vdev_id,
++						  LL_SAP_CSA_CONCURENCY);
+ 		return ret;
+ 	}
+ 
+@@ -3971,12 +3971,23 @@ int hdd_softap_set_channel_change(struct wlan_hdd_link_info *link_info,
+ 							   adapter->device_mode,
+ 							   link_info->vdev_id);
+ 
+-	if (ll_sap_freq && pm_con_mode == PM_SAP_MODE &&
++	if (is_ll_lt_sap_vdev &&
++	    !policy_mgr_is_ll_lt_freq_allowed(hdd_ctx->psoc,
++				target_chan_freq, link_info->vdev_id)) {
++		hdd_err("ll_sap %d new freq %d not allowed as it creating SCC",
++			link_info->vdev_id, target_chan_freq);
++		return -EINVAL;
++	} else if (ll_sap_freq && pm_con_mode == PM_SAP_MODE &&
+ 	    policy_mgr_are_2_freq_on_same_mac(hdd_ctx->psoc, target_chan_freq,
+ 					      ll_sap_freq)) {
+ 		hdd_err("ll_sap freq %d and sap freq %d are on same mac",
+ 			ll_sap_freq, target_chan_freq);
+ 		return -EINVAL;
++	} else if (ll_sap_freq && pm_con_mode == PM_P2P_GO_MODE &&
++		   ll_sap_freq == target_chan_freq) {
++		hdd_err("ll_sap freq %d and GO freq %d will lead to SCC",
++			ll_sap_freq, target_chan_freq);
++		return -EINVAL;
+ 	}
+ 
+ 	if (wlan_reg_is_6ghz_chan_freq(target_chan_freq) &&
+@@ -4490,7 +4501,7 @@ QDF_STATUS wlan_hdd_get_channel_for_sap_restart(struct wlan_objmgr_psoc *psoc,
+ 		ch_params.ch_width = CH_WIDTH_MAX;
+ 
+ 	if (policy_mgr_is_vdev_ll_lt_sap(psoc, vdev_id)) {
+-		if (!policy_mgr_is_ll_lt_sap_restart_required(psoc)) {
++		if (!policy_mgr_is_ll_lt_sap_restart_required(psoc, 0)) {
+ 			hdd_debug("vdev %d freq %d, LL LT SAP dont need Channel change",
+ 				  vdev_id, sap_context->chan_freq);
+ 			wlansap_context_put(sap_context);
+diff --git a/core/hdd/src/wlan_hdd_ioctl.c b/core/hdd/src/wlan_hdd_ioctl.c
+index bab11dd..bf1e829 100644
+--- a/core/hdd/src/wlan_hdd_ioctl.c
++++ b/core/hdd/src/wlan_hdd_ioctl.c
+@@ -1,6 +1,6 @@
+ /*
+  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
+- * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+  *
+  * Permission to use, copy, modify, and/or distribute this software for
+  * any purpose with or without fee is hereby granted, provided that the
+@@ -312,7 +312,11 @@ static bool hdd_check_and_fill_freq(uint32_t in_chan, qdf_freq_t *freq,
+ 	else
+ 		return false;
+ 
+-	if (!wlan_reg_is_freq_enabled(pdev, *freq, REG_CURRENT_PWR_MODE))
++	hdd_debug("channel num: %d, freq: %d", in_chan, *freq);
++
++	/* freq = 0 is a valid input, so return true */
++	if (*freq &&
++	    !wlan_reg_is_freq_enabled(pdev, *freq, REG_CURRENT_PWR_MODE))
+ 		return false;
+ 
+ 	return true;
+diff --git a/core/hdd/src/wlan_hdd_main.c b/core/hdd/src/wlan_hdd_main.c
+index 39644d9..eb029fb 100644
+--- a/core/hdd/src/wlan_hdd_main.c
++++ b/core/hdd/src/wlan_hdd_main.c
+@@ -6875,6 +6875,45 @@ hdd_set_derived_multicast_list(struct wlan_objmgr_psoc *psoc,
+ 	*mc_count += driver_mc_cnt;
+ }
+ 
++static uint64_t last_set_multcast_ts;
++/* do not accept new set multcast request if less than 100 ms interval */
++#define MIN_INTERVAL_SET_MULTCAST_US 100000
++
++/**
++ * hdd_rate_limit_set_multicast_needed() - Determine whether to rate-limit
++ * multicast filter update requests.
++ * @hdd_ctx: hdd context
++ *
++ * In certain abnormal scenarios, __hdd_set_multicast_list() may be invoked
++ * very frequently by the kernel or user-space applications within a short
++ * time window. This can result in a large number of WMI commands being queued
++ * in the WMI layer, potentially leading to system instability.
++ *
++ * This API checks the current WMI pending queue length and applies rate
++ * limiting if the interval between consecutive calls is less than 100ms.
++ *
++ * Return: false if the multicast update should proceed, true if it should be
++ * rejected.
++ */
++static bool
++hdd_rate_limit_set_multicast_needed(struct hdd_context *hdd_ctx)
++{
++	uint64_t interval;
++	bool needed = false;
++
++	if (ucfg_pmo_rate_limit_needed(hdd_ctx->psoc)) {
++		interval = qdf_get_monotonic_boottime() - last_set_multcast_ts;
++		if (interval < MIN_INTERVAL_SET_MULTCAST_US) {
++			hdd_debug_rl("ignore due to interval %d",
++				     (uint32_t)interval);
++			needed = true;
++		}
++	}
++	last_set_multcast_ts = qdf_get_monotonic_boottime();
++
++	return needed;
++}
++
+ /**
+  * __hdd_set_multicast_list() - set the multicast address list
+  * @dev: Pointer to the WLAN device.
+@@ -6915,6 +6954,9 @@ static void __hdd_set_multicast_list(struct net_device *dev)
+ 		return;
+ 	}
+ 
++	if (hdd_rate_limit_set_multicast_needed(hdd_ctx))
++		return;
++
+ 	mc_list_request = qdf_mem_malloc(sizeof(*mc_list_request));
+ 	if (!mc_list_request)
+ 		return;
+diff --git a/core/mac/inc/qwlan_version.h b/core/mac/inc/qwlan_version.h
+index 4e64e78..2a2fbaa 100644
+--- a/core/mac/inc/qwlan_version.h
++++ b/core/mac/inc/qwlan_version.h
+@@ -32,9 +32,9 @@
+ #define QWLAN_VERSION_MAJOR            5
+ #define QWLAN_VERSION_MINOR            2
+ #define QWLAN_VERSION_PATCH            1
+-#define QWLAN_VERSION_EXTRA            ""
++#define QWLAN_VERSION_EXTRA            "K"
+ #define QWLAN_VERSION_BUILD            123
+ 
+-#define QWLAN_VERSIONSTR               "5.2.1.123"
++#define QWLAN_VERSIONSTR               "5.2.1.123K"
+ 
+ #endif /* QWLAN_VERSION_H */
+diff --git a/core/mac/src/dph/dph_hash_table.c b/core/mac/src/dph/dph_hash_table.c
+index 0058e30..f0b87c1 100644
+--- a/core/mac/src/dph/dph_hash_table.c
++++ b/core/mac/src/dph/dph_hash_table.c
+@@ -1,6 +1,6 @@
+ /*
+  * Copyright (c) 2012-2020 The Linux Foundation. All rights reserved.
+- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+  *
+  * Permission to use, copy, modify, and/or distribute this software for
+  * any purpose with or without fee is hereby granted, provided that the
+@@ -245,7 +245,6 @@ tpDphHashNode dph_init_sta_state(struct mac_context *mac, tSirMacAddr staAddr,
+ 	sta->is_disassoc_deauth_in_progress = 0;
+ 	sta->sta_deletion_in_progress = false;
+ 	sta->valid = 1;
+-	sta->is_key_installed = 0;
+ 	return sta;
+ }
+ 
+diff --git a/core/mac/src/include/dph_global.h b/core/mac/src/include/dph_global.h
+index a9caa77..ca81e1c 100644
+--- a/core/mac/src/include/dph_global.h
++++ b/core/mac/src/include/dph_global.h
+@@ -181,7 +181,6 @@ typedef struct sDphHashNode {
+ #endif
+ 	uint8_t timingMeasCap;
+ 	/* key installed for this STA or not in the firmware */
+-	uint8_t is_key_installed;
+ 	uint8_t is_disassoc_deauth_in_progress;
+ 
+ 	uint8_t nss;
+diff --git a/core/mac/src/pe/lim/lim_api.c b/core/mac/src/pe/lim/lim_api.c
+index c0ab792..f444b77 100644
+--- a/core/mac/src/pe/lim/lim_api.c
++++ b/core/mac/src/pe/lim/lim_api.c
+@@ -683,7 +683,6 @@ bool is_mgmt_protected(uint32_t vdev_id,
+ 	uint16_t aid;
+ 	tpDphHashNode sta_ds;
+ 	struct pe_session *session;
+-	bool protected = false;
+ 	struct mac_context *mac_ctx = cds_get_context(QDF_MODULE_ID_PE);
+ 
+ 	if (!mac_ctx)
+@@ -698,19 +697,24 @@ bool is_mgmt_protected(uint32_t vdev_id,
+ 
+ 	sta_ds = dph_lookup_hash_entry(mac_ctx, (uint8_t *)peer_mac_addr, &aid,
+ 				       &session->dph.dphHashTable);
+-	if (sta_ds) {
+-		/* rmfenabled will be set at the time of addbss.
+-		 * but sometimes EAP auth fails and keys are not
+-		 * installed then if we send any management frame
+-		 * like deauth/disassoc with this bit set then
+-		 * firmware crashes. so check for keys are
+-		 * installed or not also before setting the bit
+-		 */
+-		if (sta_ds->rmfEnabled && sta_ds->is_key_installed)
+-			protected = true;
++	if (!sta_ds) {
++		pe_debug(QDF_MAC_ADDR_FMT " not found sta ds",
++			 QDF_MAC_ADDR_REF(peer_mac_addr));
++		return false;
+ 	}
+ 
+-	return protected;
++	/* rmfenabled will be set at the time of addbss.
++	 * but sometimes EAP auth fails and keys are not
++	 * installed then if we send any management frame
++	 * like deauth/disassoc with this bit set then
++	 * firmware crashes. so check for keys are
++	 * installed or not also before setting the bit
++	 */
++	if (!sta_ds->rmfEnabled)
++		return false;
++
++	return wlan_peer_is_key_installed(mac_ctx->psoc,
++					  (uint8_t *)peer_mac_addr);
+ }
+ 
+ void lim_fill_dfs_p2p_group_params(struct pe_session *pe_session)
+@@ -3243,7 +3247,8 @@ pe_roam_synch_callback(struct mac_context *mac_ctx,
+ 	}
+ 
+ 	if (roam_sync_ind_ptr->auth_status == ROAM_AUTH_STATUS_AUTHENTICATED)
+-		curr_sta_ds->is_key_installed = true;
++		wlan_peer_set_key_install_flag(mac_ctx->psoc, bssid.bytes,
++					       true);
+ 
+ 	lim_mlo_roam_copy_partner_info_to_session(ft_session_ptr,
+ 						  roam_sync_ind_ptr);
+diff --git a/core/mac/src/pe/lim/lim_link_monitoring_algo.c b/core/mac/src/pe/lim/lim_link_monitoring_algo.c
+index b0b1a07..ee72289 100644
+--- a/core/mac/src/pe/lim/lim_link_monitoring_algo.c
++++ b/core/mac/src/pe/lim/lim_link_monitoring_algo.c
+@@ -569,8 +569,6 @@ void lim_rx_invalid_peer_process(struct mac_context *mac_ctx,
+ 			(struct ol_rx_inv_peer_params *)lim_msg->bodyptr;
+ 	struct pe_session *session_entry;
+ 	uint16_t reason_code = REASON_CLASS3_FRAME_FROM_NON_ASSOC_STA;
+-	uint16_t aid;
+-	tpDphHashNode sta_ds;
+ 
+ 	if (!msg) {
+ 		pe_err("Invalid body pointer in message");
+@@ -585,32 +583,29 @@ void lim_rx_invalid_peer_process(struct mac_context *mac_ctx,
+ 	}
+ 
+ 	/* only if SAP mode */
+-	if (session_entry->bssType == eSIR_INFRA_AP_MODE) {
+-		sta_ds = dph_lookup_hash_entry(mac_ctx, msg->ta, &aid,
+-					       &session_entry->dph.dphHashTable);
+-		if (sta_ds && sta_ds->is_key_installed) {
+-			/*
+-			 * Skip deauth for an associated STA.
+-			 *
+-			 * The deauth sent for invalid peer indication will
+-			 * not cleanup the SM if this is an associated STA.
+-			 * Therefore, the deauth for associated STA creates
+-			 * stale entries even after STA gets disconnected.
+-			 */
+-			pe_err_rl("Received Invalid rx peer indication for an associated STA "
+-			       QDF_MAC_ADDR_FMT, QDF_MAC_ADDR_REF(msg->ta));
+-			qdf_mem_free(msg);
+-			lim_msg->bodyptr = NULL;
+-			return;
+-		}
+-		pe_debug("send deauth frame to non-assoc STA");
+-		lim_send_deauth_mgmt_frame(mac_ctx,
+-					   reason_code,
+-					   msg->ta,
+-					   session_entry,
+-					   false);
++	if (session_entry->bssType != eSIR_INFRA_AP_MODE) {
++		pe_debug("unsupported BSS Type %d", session_entry->bssType);
++		goto end;
++	}
++
++	if (wlan_peer_is_key_installed(mac_ctx->psoc, msg->ta)) {
++		/*
++		 * Skip deauth for an associated STA.
++		 * The deauth sent for invalid peer indication will
++		 * not cleanup the SM if this is an associated STA.
++		 * Therefore, the deauth for associated STA creates
++		 * stale entries even after STA gets disconnected.
++		 */
++		pe_err_rl("Received Invalid rx peer indication for an associated STA "
++			  QDF_MAC_ADDR_FMT, QDF_MAC_ADDR_REF(msg->ta));
++		goto end;
+ 	}
+ 
++	pe_debug("send deauth frame to non-assoc STA");
++	lim_send_deauth_mgmt_frame(mac_ctx, reason_code, msg->ta, session_entry,
++				   false);
++
++end:
+ 	qdf_mem_free(msg);
+ 	lim_msg->bodyptr = NULL;
+ }
+diff --git a/core/mac/src/pe/lim/lim_process_assoc_req_frame.c b/core/mac/src/pe/lim/lim_process_assoc_req_frame.c
+index 23c902c..7d7a997 100644
+--- a/core/mac/src/pe/lim/lim_process_assoc_req_frame.c
++++ b/core/mac/src/pe/lim/lim_process_assoc_req_frame.c
+@@ -2922,6 +2922,7 @@ void lim_process_assoc_req_frame(struct mac_context *mac_ctx,
+ 	struct wlan_objmgr_vdev *vdev;
+ 	tpSirAssocReq assoc_req;
+ 	QDF_STATUS status;
++	bool is_key_installed;
+ 
+ 	hdr = WMA_GET_RX_MAC_HEADER(rx_pkt_info);
+ 	frame_len = WMA_GET_RX_PAYLOAD_LEN(rx_pkt_info);
+@@ -2954,6 +2955,8 @@ void lim_process_assoc_req_frame(struct mac_context *mac_ctx,
+ 		return;
+ 	}
+ 
++	is_key_installed = wlan_peer_is_key_installed(mac_ctx->psoc, hdr->sa);
++
+ 	/*
+ 	 * If a STA is already present in DPH and it is initiating a Assoc
+ 	 * re-transmit, do not process it. This can happen when first Assoc Req
+@@ -3008,7 +3011,7 @@ void lim_process_assoc_req_frame(struct mac_context *mac_ctx,
+ 				QDF_MAC_ADDR_REF(hdr->sa));
+ 			return;
+ 		}
+-	} else if (sta_ds && sta_ds->rmfEnabled && !sta_ds->is_key_installed) {
++	} else if (sta_ds && sta_ds->rmfEnabled && !is_key_installed) {
+ 		/* When PMF enabled, SA Query will be triggered
+ 		 * unexpectedly if duplicated assoc_req received -
+ 		 * 1) after pre_auth node deleted and
+diff --git a/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c b/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c
+index 981385e..352b7a3 100644
+--- a/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c
++++ b/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c
+@@ -1283,8 +1283,6 @@ void lim_process_mlm_set_keys_cnf(struct mac_context *mac, uint32_t *msg_buf)
+ 	/* Prepare and send SME_SETCONTEXT_RSP message */
+ 	tLimMlmSetKeysCnf *pMlmSetKeysCnf;
+ 	struct pe_session *pe_session;
+-	uint16_t aid;
+-	tpDphHashNode sta_ds = NULL;
+ 
+ 	if (!msg_buf) {
+ 		pe_err("Buffer is Pointing to NULL");
+@@ -1298,22 +1296,11 @@ void lim_process_mlm_set_keys_cnf(struct mac_context *mac, uint32_t *msg_buf)
+ 		       pMlmSetKeysCnf->sessionId);
+ 		return;
+ 	}
+-	/* if the status is success keys are installed in the
+-	* Firmware so we can set the protection bit
+-	*/
+-	if (eSIR_SME_SUCCESS == pMlmSetKeysCnf->resultCode) {
+-		sta_ds = dph_lookup_hash_entry(mac,
+-				pMlmSetKeysCnf->peer_macaddr.bytes,
+-				&aid, &pe_session->dph.dphHashTable);
+-		if (sta_ds && pMlmSetKeysCnf->key_len_nonzero)
+-			sta_ds->is_key_installed = 1;
+-	}
+-	pe_debug("vdev %d: " QDF_MAC_ADDR_FMT " Status %d key_len_nonzero %d key installed %d",
++	pe_debug("vdev %d: " QDF_MAC_ADDR_FMT " Status %d key_len_nonzero %d",
+ 		 pe_session->vdev_id,
+ 		 QDF_MAC_ADDR_REF(pMlmSetKeysCnf->peer_macaddr.bytes),
+ 		 pMlmSetKeysCnf->resultCode,
+-		 pMlmSetKeysCnf->key_len_nonzero,
+-		 sta_ds ? sta_ds->is_key_installed : 0);
++		 pMlmSetKeysCnf->key_len_nonzero);
+ 
+ 	lim_send_sme_set_context_rsp(mac,
+ 				     pMlmSetKeysCnf->peer_macaddr,
+diff --git a/core/mac/src/pe/lim/lim_send_management_frames.c b/core/mac/src/pe/lim/lim_send_management_frames.c
+index 327625c..694662e 100644
+--- a/core/mac/src/pe/lim/lim_send_management_frames.c
++++ b/core/mac/src/pe/lim/lim_send_management_frames.c
+@@ -3455,9 +3455,9 @@ lim_send_assoc_req_mgmt_frame(struct mac_context *mac_ctx,
+ 		}
+ 		/*fill rsnx opaque*/
+ 		frm->RSNXEOpaque.present = 1;
+-		frm->RSNXEOpaque.num_data = rsnx_ie[1];
+-		qdf_mem_copy(frm->RSNXEOpaque.data, rsnx_ie + 2, /* EID, len */
+-			     rsnx_ie[1]);
++		frm->RSNXEOpaque.num_data = rsnx_ie[TAG_LEN_POS];
++		qdf_mem_copy(frm->RSNXEOpaque.data, rsnx_ie + MIN_IE_LEN,
++			     rsnx_ie[TAG_LEN_POS]);
+ 
+ 	}
+ 
+@@ -3479,9 +3479,11 @@ lim_send_assoc_req_mgmt_frame(struct mac_context *mac_ctx,
+ 		}
+ 		/*fill mscs opaque*/
+ 		frm->MSCSEXTOpaque.present = 1;
+-		frm->MSCSEXTOpaque.num_data = mscs_ext_ie[1];
+-		qdf_mem_copy(frm->MSCSEXTOpaque.data, mscs_ext_ie + 2,
+-			     mscs_ext_ie[1]);
++		frm->MSCSEXTOpaque.num_data =
++			mscs_ext_ie[TAG_LEN_POS] - MSCS_OUI_SIZE;
++		qdf_mem_copy(frm->MSCSEXTOpaque.data,
++			     mscs_ext_ie + MIN_IE_LEN + MSCS_OUI_SIZE,
++			     mscs_ext_ie[TAG_LEN_POS] - MSCS_OUI_SIZE);
+ 	}
+ 
+ 	/*
+diff --git a/core/mac/src/pe/lim/lim_utils.c b/core/mac/src/pe/lim/lim_utils.c
+index e1520d0..5eb50fe 100644
+--- a/core/mac/src/pe/lim/lim_utils.c
++++ b/core/mac/src/pe/lim/lim_utils.c
+@@ -5106,49 +5106,35 @@ void lim_get_short_slot_from_phy_mode(struct mac_context *mac, struct pe_session
+ 	*pShortSlotEnabled = val;
+ }
+ 
+-/**
+- *
+- * \brief This function is called by various LIM modules to correctly set
+- * the Protected bit in the Frame Control Field of the 802.11 frame MAC header
+- *
+- *
+- * \param  mac Pointer to Global MAC structure
+- *
+- * \param pe_session Pointer to session corresponding to the connection
+- *
+- * \param peer Peer address of the STA to which the frame is to be sent
+- *
+- * \param pMacHdr Pointer to the frame MAC header
+- *
+- * \return nothing
+- *
+- *
+- */
+ void
+ lim_set_protected_bit(struct mac_context *mac,
+ 		      struct pe_session *pe_session,
+-		      tSirMacAddr peer, tpSirMacMgmtHdr pMacHdr)
++		      tSirMacAddr peer_mac, tpSirMacMgmtHdr pMacHdr)
+ {
+ 	uint16_t aid;
+ 	tpDphHashNode sta;
+ 
+-	sta = dph_lookup_hash_entry(mac, peer, &aid,
++	sta = dph_lookup_hash_entry(mac, peer_mac, &aid,
+ 				    &pe_session->dph.dphHashTable);
+-	if (sta) {
+-		/* rmfenabled will be set at the time of addbss.
+-		 * but sometimes EAP auth fails and keys are not
+-		 * installed then if we send any management frame
+-		 * like deauth/disassoc with this bit set then
+-		 * firmware crashes. so check for keys are
+-		 * installed or not also before setting the bit
+-		 */
+-		if (sta->rmfEnabled && sta->is_key_installed)
+-			pMacHdr->fc.wep = 1;
+-
+-		pe_debug("wep:%d rmf:%d is_key_set:%d", pMacHdr->fc.wep,
+-			 sta->rmfEnabled, sta->is_key_installed);
++	if (!sta) {
++		pe_debug(QDF_MAC_ADDR_FMT " not found sta ds",
++			 QDF_MAC_ADDR_REF(peer_mac));
++		return;
+ 	}
+-} /*** end lim_set_protected_bit() ***/
++
++	/* rmfenabled will be set at the time of addbss.
++	 * but sometimes EAP auth fails and keys are not
++	 * installed then if we send any management frame
++	 * like deauth/disassoc with this bit set then
++	 * firmware crashes. so check for keys are
++	 * installed or not also before setting the bit
++	 */
++	if (!sta->rmfEnabled)
++		return;
++
++	if (wlan_peer_is_key_installed(mac->psoc, peer_mac))
++		pMacHdr->fc.wep = 1;
++}
+ 
+ void lim_set_ht_caps(struct mac_context *p_mac, uint8_t *p_ie_start,
+ 		     uint32_t num_bytes)
+diff --git a/core/mac/src/pe/lim/lim_utils.h b/core/mac/src/pe/lim/lim_utils.h
+index f0acc02..ec217e2 100644
+--- a/core/mac/src/pe/lim/lim_utils.h
++++ b/core/mac/src/pe/lim/lim_utils.h
+@@ -1070,9 +1070,25 @@ bool lim_check_disassoc_deauth_ack_pending(struct mac_context *mac,
+ 
+ void lim_pmf_sa_query_timer_handler(void *pMacGlobal, uint32_t param);
+ void lim_pmf_comeback_timer_callback(void *context);
++
++/**
++ *
++ * lim_set_protected_bit() - API to set the protected bit in the management
++ * frame.
++ *
++ * @mac: Pointer to Global MAC structure
++ * @pe_session: Pointer to session corresponding to the connection
++ * @peer_mac: Peer address of the STA to which the frame is to be sent
++ * @pMacHdr: Pointer to the frame MAC header
++ *
++ * This function is called by various LIM modules to correctly set
++ * the Protected bit in the Frame Control Field of the 802.11 frame MAC header
++ *
++ * Return: none
++ */
+ void lim_set_protected_bit(struct mac_context *mac,
+ 	struct pe_session *pe_session,
+-	tSirMacAddr peer, tpSirMacMgmtHdr pMacHdr);
++	tSirMacAddr peer_mac, tpSirMacMgmtHdr pMacHdr);
+ 
+ void lim_set_ht_caps(struct mac_context *p_mac, uint8_t *p_ie_start,
+ 		     uint32_t num_bytes);
+diff --git a/core/mac/src/sys/legacy/src/utils/src/parser_api.c b/core/mac/src/sys/legacy/src/utils/src/parser_api.c
+index fffd27f..cfea7ab 100644
+--- a/core/mac/src/sys/legacy/src/utils/src/parser_api.c
++++ b/core/mac/src/sys/legacy/src/utils/src/parser_api.c
+@@ -723,6 +723,8 @@ populate_dot11f_chan_switch_wrapper(struct mac_context *mac,
+ 	qdf_freq_t target_freq;
+ 	uint8_t ccfs0, ccfs1;
+ 	enum phy_ch_width ch_width;
++	uint8_t vht_ch_width = WNI_CFG_VHT_CHANNEL_WIDTH_20_40MHZ;
++
+ 	/*
+ 	 * The new country subelement is present only when
+ 	 * 1. AP performs Extended Channel switching to new country.
+@@ -754,10 +756,10 @@ populate_dot11f_chan_switch_wrapper(struct mac_context *mac,
+ 	 * comes between 80 MHz and 160 MHz by presence of CCFS1 incase of
+ 	 * 160 MHz which is set to zero incase of 80 MHz.
+ 	 */
+-	if (ch_width == WNI_CFG_VHT_CHANNEL_WIDTH_160MHZ)
+-		ch_width = WNI_CFG_VHT_CHANNEL_WIDTH_80MHZ;
++	if (ch_width == CH_WIDTH_160MHZ)
++		vht_ch_width = WNI_CFG_VHT_CHANNEL_WIDTH_80MHZ;
+ 
+-	pDot11f->WiderBWChanSwitchAnn.newChanWidth = ch_width;
++	pDot11f->WiderBWChanSwitchAnn.newChanWidth = vht_ch_width;
+ 	pDot11f->WiderBWChanSwitchAnn.newCenterChanFreq0 = ccfs0;
+ 	pDot11f->WiderBWChanSwitchAnn.newCenterChanFreq1 = ccfs1;
+ 	pDot11f->WiderBWChanSwitchAnn.present = 1;
+diff --git a/core/sap/src/sap_fsm.c b/core/sap/src/sap_fsm.c
+index d57622e..bac6c66 100644
+--- a/core/sap/src/sap_fsm.c
++++ b/core/sap/src/sap_fsm.c
+@@ -3792,6 +3792,17 @@ static void sap_check_and_update_vdev_ch_params(struct sap_context *sap_ctx)
+ 		sap_debug("Couldn't get vdev active channel");
+ 		return;
+ 	}
++
++	/*
++	 * for LL LT SAP freq can change after serialization in case of race
++	 * between two interface to avoid SCC
++	 */
++	if (sap_ctx->chan_freq != chan->ch_freq) {
++		sap_debug("Vdev %d updated freq %d -> %d", sap_ctx->vdev_id,
++			  sap_ctx->chan_freq,
++			  chan->ch_freq);
++		sap_ctx->chan_freq = chan->ch_freq;
++	}
+ 	if (sap_ctx->ch_params.ch_width == chan->ch_width)
+ 		return;
+ 
+@@ -3810,8 +3821,8 @@ static void sap_check_and_update_vdev_ch_params(struct sap_context *sap_ctx)
+ 		else
+ 			sap_ctx->ch_params.sec_ch_offset = HIGH_PRIMARY_CH;
+ 	}
+-	sap_debug("updated BW %d -> %d", orig_ch_width,
+-		  sap_ctx->ch_params.ch_width);
++	sap_debug("vdev %d updated BW %d -> %d", sap_ctx->vdev_id,
++		  orig_ch_width, sap_ctx->ch_params.ch_width);
+ }
+ 
+ /**
+diff --git a/core/sme/src/common/sme_api.c b/core/sme/src/common/sme_api.c
+index b2cc684..f3ccd37 100644
+--- a/core/sme/src/common/sme_api.c
++++ b/core/sme/src/common/sme_api.c
+@@ -90,6 +90,7 @@
+ #include "wlan_vdev_mgr_ucfg_api.h"
+ #include "wlan_vdev_mlme_main.h"
+ #include "wlan_tdls_api.h"
++#include "wlan_ll_sap_api.h"
+ 
+ static QDF_STATUS init_sme_cmd_list(struct mac_context *mac);
+ 
+@@ -17180,6 +17181,39 @@ p2p_self_peer_create:
+ }
+ #endif
+ 
++/**
++ * sme_validate_n_update_ll_lt_sap_freq() - Validate and update the LL_LT_SAP
++ * frequency.
++ *
++ * This function checks if the LL_LT_SAP can start on the current frequency.
++ * If not, it updates the frequency from the valid frequency list.
++ *
++ * @mac: Pointer to the MAC context.
++ * @con_mode: The connection mode.
++ * @cfg: Pointer to the start BSS configuration.
++ *
++ * Return: None
++ */
++static void sme_validate_n_update_ll_lt_sap_freq(struct mac_context *mac,
++					enum policy_mgr_con_mode con_mode,
++					struct start_bss_config *cfg)
++{
++	enum sap_csa_reason_code csa_reason;
++	qdf_freq_t new_freq;
++
++	if (con_mode != PM_LL_LT_SAP_MODE)
++		return;
++
++	new_freq = wlan_get_ll_lt_sap_restart_freq(mac->pdev, cfg->oper_ch_freq,
++						   cfg->vdev_id, &csa_reason);
++	if (new_freq == cfg->oper_ch_freq)
++		return;
++
++	sme_debug("LL_LT_SAP %d: concurrency updated freq %d => %d",
++		  cfg->vdev_id, cfg->oper_ch_freq, new_freq);
++	cfg->oper_ch_freq = new_freq;
++}
++
+ static QDF_STATUS sme_send_start_bss_msg(struct mac_context *mac,
+ 					 struct start_bss_config *cfg)
+ {
+@@ -17203,8 +17237,7 @@ static QDF_STATUS sme_send_start_bss_msg(struct mac_context *mac,
+ 	 * condition case.
+ 	 */
+ 	conn_count = policy_mgr_get_connection_count(mac->psoc);
+-	if ((pm_con_mode == PM_SAP_MODE ||
+-	     pm_con_mode == PM_P2P_GO_MODE) &&
++	if (policy_mgr_is_beaconing_mode(pm_con_mode) &&
+ 	    conn_count != cfg->curr_conn_count &&
+ 	    conn_count > 1 &&
+ 	    !policy_mgr_allow_concurrency(mac->psoc,
+@@ -17217,6 +17250,9 @@ static QDF_STATUS sme_send_start_bss_msg(struct mac_context *mac,
+ 		goto failure;
+ 	}
+ 
++	if (pm_con_mode == PM_LL_LT_SAP_MODE)
++		sme_validate_n_update_ll_lt_sap_freq(mac, pm_con_mode, cfg);
++
+ 	csr_roam_state_change(mac, eCSR_ROAMING_STATE_JOINING, cfg->vdev_id);
+ 	csr_roam_substate_change(mac, eCSR_ROAM_SUBSTATE_START_BSS_REQ,
+ 				 cfg->vdev_id);
+diff --git a/core/sme/src/csr/csr_api_roam.c b/core/sme/src/csr/csr_api_roam.c
+index 284eaa4..dd8e967 100644
+--- a/core/sme/src/csr/csr_api_roam.c
++++ b/core/sme/src/csr/csr_api_roam.c
+@@ -5907,6 +5907,12 @@ QDF_STATUS cm_csr_handle_diconnect_req(struct wlan_objmgr_vdev *vdev,
+ 		return QDF_STATUS_E_INVAL;
+ 	}
+ 
++	if (cm_csr_is_ss_wait_for_key(vdev_id)) {
++		mlme_debug("Stop Wait for key timer");
++		cm_stop_wait_for_key_timer(mac_ctx->psoc, vdev_id);
++		cm_csr_set_ss_none(vdev_id);
++	}
++
+ 	cm_csr_set_joining(vdev_id);
+ 
+ 	/* Update the disconnect stats */
+diff --git a/os_if/dp/src/os_if_dp_txrx.c b/os_if/dp/src/os_if_dp_txrx.c
+index 45eae18..de44df7 100644
+--- a/os_if/dp/src/os_if_dp_txrx.c
++++ b/os_if/dp/src/os_if_dp_txrx.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+  *
+  * Permission to use, copy, modify, and/or distribute this software for any
+  * purpose with or without fee is hereby granted, provided that the above
+@@ -41,6 +41,10 @@
+ #include <wlan_hdd_main.h>
+ #include "wlan_hdd_wmm.h"
+ 
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0))
++#include <net/gro.h>
++#endif
++
+ /**
+  * osif_dp_classify_pkt() - classify packet
+  * @skb:  sk buff
+@@ -205,6 +209,26 @@ void osif_dp_mark_pkt_type(struct sk_buff *skb)
+ #endif
+ #endif
+ 
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0))
++static inline void osif_dp_napi_flush(struct napi_struct *napi)
++{
++	if (napi->gro.rx_count) {
++		netif_receive_skb_list(&napi->gro.rx_list);
++		qdf_init_list_head(&napi->gro.rx_list);
++		napi->gro.rx_count = 0;
++	}
++}
++#else
++static inline void osif_dp_napi_flush(struct napi_struct *napi)
++{
++	if (napi->rx_count) {
++		netif_receive_skb_list(&napi->rx_list);
++		qdf_init_list_head(&napi->rx_list);
++		napi->rx_count = 0;
++	}
++}
++#endif /* KERNEL_VERSION(6, 15, 0)*/
++
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+ /**
+  * osif_dp_rx_thread_napi_gro_flush() - do gro flush
+@@ -225,11 +249,7 @@ void osif_dp_rx_thread_napi_gro_flush(struct napi_struct *napi,
+ 		if (flush_code != DP_RX_GRO_LOW_TPUT_FLUSH)
+ 			napi_gro_flush(napi, false);
+ 
+-		if (napi->rx_count) {
+-			netif_receive_skb_list(&napi->rx_list);
+-			qdf_init_list_head(&napi->rx_list);
+-			napi->rx_count = 0;
+-		}
++		osif_dp_napi_flush(napi);
+ 	}
+ }
+ #else

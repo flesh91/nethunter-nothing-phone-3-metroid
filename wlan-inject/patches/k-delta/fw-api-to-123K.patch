@@ -1,0 +1,2357 @@
+diff -ruN a/fw/htt.h b/fw/htt.h
+--- a/fw/htt.h
++++ b/fw/htt.h
+@@ -817,7 +817,8 @@
+     HTT_STATS_TX_PDEV_AP_EDCA_PARAMS_STATS_TAG     = 171, /* htt_tx_pdev_ap_edca_params_stats_tlv_v, TOPIC=advanced */
+     HTT_STATS_TXBF_OFDMA_AX_STEER_MPDU_STATS_TAG   = 172, /* htt_txbf_ofdma_ax_steer_mpdu_stats_tlv, TOPIC=advanced */
+     HTT_STATS_TXBF_OFDMA_BE_STEER_MPDU_STATS_TAG   = 173, /* htt_txbf_ofdma_be_steer_mpdu_stats_tlv, TOPIC=advanced */
+-    HTT_STATS_PEER_AX_OFDMA_STATS_TAG              = 174, /* htt_peer_ax_ofdma_stats_tlv */
++    HTT_STATS_PEER_OFDMA_STATS_TAG                 = 174, /* htt_stats_peer_ofdma_stats_tlv */
++        HTT_STATS_PEER_AX_OFDMA_STATS_TAG = HTT_STATS_PEER_OFDMA_STATS_TAG, /* DEPRECATED */
+     HTT_STATS_TX_PDEV_MU_EDCA_PARAMS_STATS_TAG     = 175, /* htt_tx_pdev_mu_edca_params_stats_tlv_v, TOPIC=advanced */
+     HTT_STATS_PDEV_MBSSID_CTRL_FRAME_STATS_TAG     = 176, /* htt_pdev_mbssid_ctrl_frame_stats_tlv */
+     HTT_STATS_TX_PDEV_MLO_ABORT_TAG                = 177, /* htt_tx_pdev_stats_mlo_abort_tlv_v */
+@@ -863,6 +864,18 @@
+     HTT_STATS_TX_PDEV_PENDING_SEQ_CNT_IN_TXQ_HIST_TAG        = 217, /* htt_stats_tx_pdev_pending_seq_cnt_in_txq_hist_tlv */
+     HTT_STATS_SCHED_TXQ_EARLY_COMPL_TAG                      = 218, /* htt_stats_sched_txq_early_compl_tlv */
+     HTT_STATS_RX_PDEV_BN_UL_OFDMA_USER_TAG                   = 219, /* htt_stats_rx_pdev_bn_ul_ofdma_user_tlv */
++    HTT_STATS_TX_SELFGEN_BN_ERR_TAG                 = 220, /* htt_stats_tx_selfgen_bn_err_tlv, TOPIC=advanced */
++    HTT_STATS_TX_SELFGEN_BN_TAG                     = 221, /* htt_stats_tx_selfgen_bn_tlv, TOPIC=advanced */
++    HTT_STATS_TX_SELFGEN_BN_SCHED_STATUS_TAG        = 222, /* htt_stats_tx_selfgen_bn_sched_status_tlv, TOPIC=advanced */
++    HTT_STATS_TX_PDEV_BN_DL_MU_OFDMA_STATS_TAG      = 223, /* htt_stats_tx_pdev_bn_dl_mu_ofdma_tlv, TOPIC=advanced */
++    HTT_STATS_TX_PDEV_BN_UL_MU_OFDMA_STATS_TAG      = 224, /* htt_stats_tx_pdev_bn_ul_mu_ofdma_tlv, TOPIC=advanced */
++    HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_TAG          = 225, /* htt_stats_rx_peer_tid_reo_queue_ba_tlv */
++    HTT_STATS_TXBF_OFDMA_BN_NDPA_TAG                = 226, /* htt_stats_txbf_ofdma_bn_ndpa_tlv */
++    HTT_STATS_TXBF_OFDMA_BN_NDP_TAG                 = 227, /* htt_stats_txbf_ofdma_bn_ndp_tlv */
++    HTT_STATS_TXBF_OFDMA_BN_BRP_TAG                 = 228, /* htt_stats_txbf_ofdma_bn_brp_tlv */
++    HTT_STATS_TXBF_OFDMA_BN_STEER_TAG               = 229, /* htt_stats_txbf_ofdma_bn_steer_tlv */
++    HTT_STATS_TXBF_OFDMA_BN_STEER_MPDU_TAG          = 230, /* htt_stats_txbf_ofdma_bn_steer_mpdu_tlv */
++    HTT_STATS_TXBF_OFDMA_BN_PARBW_TAG               = 231, /* htt_stats_txbf_ofdma_bn_parbw_tlv */
+ 
+     HTT_STATS_MAX_TAG,
+ } htt_stats_tlv_tag_t;
+diff -ruN a/fw/htt_ppdu_stats.h b/fw/htt_ppdu_stats.h
+--- a/fw/htt_ppdu_stats.h
++++ b/fw/htt_ppdu_stats.h
+@@ -707,6 +707,58 @@
+         (((_val) & HTT_PPDU_STATS_COMMON_TRIG_COOKIE_M) >> \
+          HTT_PPDU_STATS_COMMON_TRIG_COOKIE_S)
+ 
++#define HTT_PPDU_STATS_COMMON_TLV_HTT_SEQ_TYPE_M    0x00000001
++#define HTT_PPDU_STATS_COMMON_TLV_HTT_SEQ_TYPE_S             0
++
++#define HTT_PPDU_STATS_COMMON_TLV_HTT_SEQ_TYPE_GET(_var) \
++    (((_var) & HTT_PPDU_STATS_COMMON_TLV_HTT_SEQ_TYPE_M) >> \
++    HTT_PPDU_STATS_COMMON_TLV_HTT_SEQ_TYPE_S)
++
++#define HTT_PPDU_STATS_COMMON_TLV_HTT_SEQ_TYPE_SET(_var, _val) \
++    do { \
++        HTT_CHECK_SET_VAL(HTT_PPDU_STATS_COMMON_TLV_HTT_SEQ_TYPE, _val); \
++        ((_var) |= ((_val) << HTT_PPDU_STATS_COMMON_TLV_HTT_SEQ_TYPE_S)); \
++    } while (0)
++
++#define HTT_PPDU_STATS_COMMON_TLV_IS_COMBINED_UL_BASIC_TRIGGER_M    0x00000002
++#define HTT_PPDU_STATS_COMMON_TLV_IS_COMBINED_UL_BASIC_TRIGGER_S             1
++
++#define HTT_PPDU_STATS_COMMON_TLV_IS_COMBINED_UL_BASIC_TRIGGER_GET(_var) \
++    (((_var) & HTT_PPDU_STATS_COMMON_TLV_IS_COMBINED_UL_BASIC_TRIGGER_M) >> \
++    HTT_PPDU_STATS_COMMON_TLV_IS_COMBINED_UL_BASIC_TRIGGER_S)
++
++#define HTT_PPDU_STATS_COMMON_TLV_IS_COMBINED_UL_BASIC_TRIGGER_SET(_var, _val) \
++    do { \
++        HTT_CHECK_SET_VAL(HTT_PPDU_STATS_COMMON_TLV_IS_COMBINED_UL_BASIC_TRIGGER, _val); \
++        ((_var) |= ((_val) << HTT_PPDU_STATS_COMMON_TLV_IS_COMBINED_UL_BASIC_TRIGGER_S)); \
++    } while (0)
++
++#define HTT_PPDU_STATS_COMMON_TLV_IS_MANUAL_ULOFDMA_TRIGGER_M    0x00000004
++#define HTT_PPDU_STATS_COMMON_TLV_IS_MANUAL_ULOFDMA_TRIGGER_S             2
++
++#define HTT_PPDU_STATS_COMMON_TLV_IS_MANUAL_ULOFDMA_TRIGGER_GET(_var) \
++    (((_var) & HTT_PPDU_STATS_COMMON_TLV_IS_MANUAL_ULOFDMA_TRIGGER_M) >> \
++    HTT_PPDU_STATS_COMMON_TLV_IS_MANUAL_ULOFDMA_TRIGGER_S)
++
++#define HTT_PPDU_STATS_COMMON_TLV_IS_MANUAL_ULOFDMA_TRIGGER_SET(_var, _val) \
++    do { \
++        HTT_CHECK_SET_VAL(HTT_PPDU_STATS_COMMON_TLV_IS_MANUAL_ULOFDMA_TRIGGER, _val); \
++        ((_var) |= ((_val) << HTT_PPDU_STATS_COMMON_TLV_IS_MANUAL_ULOFDMA_TRIGGER_S)); \
++    } while (0)
++
++#define HTT_PPDU_STATS_COMMON_TLV_IS_COMBINED_UL_BSRP_TRIGGER_M    0x00000008
++#define HTT_PPDU_STATS_COMMON_TLV_IS_COMBINED_UL_BSRP_TRIGGER_S             3
++
++#define HTT_PPDU_STATS_COMMON_TLV_IS_COMBINED_UL_BSRP_TRIGGER_GET(_var) \
++    (((_var) & HTT_PPDU_STATS_COMMON_TLV_IS_COMBINED_UL_BSRP_TRIGGER_M) >> \
++    HTT_PPDU_STATS_COMMON_TLV_IS_COMBINED_UL_BSRP_TRIGGER_S)
++
++#define HTT_PPDU_STATS_COMMON_TLV_IS_COMBINED_UL_BSRP_TRIGGER_SET(_var, _val) \
++    do { \
++        HTT_CHECK_SET_VAL(HTT_PPDU_STATS_COMMON_TLV_IS_COMBINED_UL_BSRP_TRIGGER, _val); \
++        ((_var) |= ((_val) << HTT_PPDU_STATS_COMMON_TLV_IS_COMBINED_UL_BSRP_TRIGGER_S)); \
++    } while (0)
++
+ enum HTT_SEQ_TYPE {
+     WAL_PPDU_SEQ_TYPE = 0,
+     HTT_PPDU_SEQ_TYPE = 1,
+@@ -902,26 +954,26 @@
+      *               HTT_PPDU_SEQ_TYPE then decoder should interpret the
+      *               seq type as HTT_PPDU_STATS_SEQ_TYPE.
+      *               htt_seq_type field will be set to HTT_PPDU_SEQ_TYPE in
+-     *               firmware versions where this field is defined.
+-     * BIT [31: 1] - reserved
++     * BIT [1 : 1] - is_combined_ul_basic_trigger - Flag to indicate if a
++     *               given UL OFDMA/MU-MIMO Basic trigger is sent combined
++     *               as part of existing DL data sequence.
++     * BIT [2 : 2] - is_manual_ulofdma_trigger - Flag to indicate if a
++     *               given UL OFDMA trigger is manually triggered from the Host.
++     * BIT [3 : 3] - is_combined_ul_bsrp_trigger - Flag to indicate if a
++     *               given UL BSRP trigger is sent combined as part of
++     *               an existing DL/UL data sequence
++     * BIT [31: 4] - reserved
+      */
+     union {
+         A_UINT32 reserved__htt_seq_type;
+         struct {
+             A_UINT32 htt_seq_type:  1,
+-                     reserved3:     31;
++                     is_combined_ul_basic_trigger: 1,
++                     is_manual_ulofdma_trigger: 1,
++                     is_combined_ul_bsrp_trigger: 1,
++                     reserved3:     28;
+         };
+     };
+-    /* is_manual_ulofdma_trigger:
+-     * Flag to indicate if a given UL OFDMA trigger is manually triggered
+-     * from the Host
+-     */
+-    A_UINT32 is_manual_ulofdma_trigger;
+-    /* is_combined_ul_bsrp_trigger:
+-     * Flag to indicate if a given UL BSRP trigger is sent combined as
+-     * part of existing DL/UL data sequence
+-     */
+-    A_UINT32 is_combined_ul_bsrp_trigger;
+     /* Flag to indicate if the channel chosen is 320_1 / 320_2 */
+     A_UINT32 chan_type_320mhz;
+ } htt_ppdu_stats_common_tlv;
+@@ -1888,6 +1940,32 @@
+         ((_var) |= ((_val) << HTT_PPDU_STATS_USER_RATE_TLV_IS_MIN_RATE_S)); \
+     } while (0)
+ 
++#define HTT_PPDU_STATS_USER_RATE_TLV_2xLDPC_M  0x00040000
++#define HTT_PPDU_STATS_USER_RATE_TLV_2xLDPC_S          18
++
++#define HTT_PPDU_STATS_USER_RATE_TLV_2xLDPC_GET(_var) \
++    (((_var) & HTT_PPDU_STATS_USER_RATE_TLV_2xLDPC_M) >> \
++    HTT_PPDU_STATS_USER_RATE_TLV_2xLDPC_S)
++
++#define HTT_PPDU_STATS_USER_RATE_TLV_2xLDPC_SET (_var , _val) \
++    do { \
++        HTT_CHECK_SET_VAL(HTT_PPDU_STATS_USER_RATE_TLV_2XLDPC, _val); \
++        ((_var) |= ((_val) << HTT_PPDU_STATS_USER_RATE_TLV_2xLDPC_S)); \
++    } while (0)
++
++#define HTT_PPDU_STATS_USER_RATE_TLV_IS_NPCA_ENABLED_M  0x00080000
++#define HTT_PPDU_STATS_USER_RATE_TLV_IS_NPCA_ENABLED_S          19
++
++#define HTT_PPDU_STATS_USER_RATE_TLV_IS_NPCA_ENABLED_GET(_var) \
++    (((_var) & HTT_PPDU_STATS_USER_RATE_TLV_IS_NPCA_ENABLED_M) >> \
++    HTT_PPDU_STATS_USER_RATE_TLV_IS_NPCA_ENABLED_S)
++
++#define HTT_PPDU_STATS_USER_RATE_TLV_IS_NPCA_ENABLED_SET (_var , _val) \
++    do { \
++        HTT_CHECK_SET_VAL(HTT_PPDU_STATS_USER_RATE_TLV_IS_NPCA_ENABLED, _val); \
++        ((_var) |= ((_val) << HTT_PPDU_STATS_USER_RATE_TLV_IS_NPCA_ENABLED_S)); \
++    } while (0)
++
+ typedef enum HTT_PPDU_STATS_RU_SIZE {
+     HTT_PPDU_STATS_RU_26,
+     HTT_PPDU_STATS_RU_52,
+@@ -2075,11 +2153,16 @@
+      *                punctured.
+      * BIT 16      :- flag showing whether EHT extra LTF is applied
+      *                for current PPDU
++     * BIT 17      :- flag to show is_min_rate
++     * BIT 18      :- flag showing whether PPDU is transmitted with 2xLDPC
++     * BIT 19      :- flag showing whether PPDU is transmitted with NPCA enabled
+      */
+     A_UINT32 punc_pattern_bitmap: 16,
+-             extra_eht_ltf:       1,
+-             is_min_rate:         1,
+-             reserved4:           14;
++             extra_eht_ltf:        1,
++             is_min_rate:          1,
++             is_2xldpc:            1,
++             is_npca_enabled:      1,
++             reserved4:           12;
+ } htt_ppdu_stats_user_rate_tlv;
+ 
+ #define HTT_PPDU_STATS_USR_RATE_VALID_M     0x80000000
+diff -ruN a/fw/htt_stats.h b/fw/htt_stats.h
+--- a/fw/htt_stats.h
++++ b/fw/htt_stats.h
+@@ -186,6 +186,7 @@
+      *           7 bit htt_peer_sched_stats_tlv
+      *           8 bit htt_peer_ax_ofdma_stats_tlv
+      *           9 bit htt_peer_be_ofdma_stats_tlv
++     *          10 bit htt_stats_rx_peer_tid_reo_queue_ba_tlv
+      *   - config_param2: [Bit31 : Bit0] mac_addr31to0
+      *   - config_param3: [Bit15 : Bit0] mac_addr47to32
+      *                    [Bit 16] If this bit is set, reset per peer stats
+@@ -693,12 +694,14 @@
+         HTT_DBG_ODD_UL_BE_OFDMA_STATS =
+             HTT_DBG_EXT_STATS_ODD_UL_BE_BN_OFDMA,
+ 
+-    /** HTT_DBG_EXT_STATS_ODD_BE_TXBF_OFDMA
++    /** HTT_DBG_EXT_STATS_ODD_BE_BN_TXBF_OFDMA_STATS
+      */
+-    HTT_DBG_EXT_STATS_ODD_BE_TXBF_OFDMA = 61,
+-        /* retain the deprecated name as an alias */
++    HTT_DBG_EXT_STATS_ODD_BE_BN_TXBF_OFDMA_STATS = 61,
++        /* retain the deprecated names as aliases */
++        HTT_DBG_EXT_STATS_ODD_BE_TXBF_OFDMA =
++            HTT_DBG_EXT_STATS_ODD_BE_BN_TXBF_OFDMA_STATS,
+         HTT_DBG_ODD_BE_TXBF_OFDMA_STATS =
+-            HTT_DBG_EXT_STATS_ODD_BE_TXBF_OFDMA,
++            HTT_DBG_EXT_STATS_ODD_BE_BN_TXBF_OFDMA_STATS,
+ 
+     /** HTT_DBG_EXT_STATS_ODD_STATS_PDEV_BE_UL_MUMIMO_TRIG
+      * PARAMS:
+@@ -919,6 +922,25 @@
+      * TLV: htt_tx_pdev_ul_be_mu_ofdma_sch_stats_tlv
+      */
+     HTT_UPLOAD_BE_UL_MU_OFDMA_STATS,
++
++    /*
++     * Upload BN UL MU-OFDMA + BN DL MU-OFDMA stats,
++     * TLV: htt_stats_tx_pdev_bn_dl_mu_ofdma_tlv and
++     * htt_stats_tx_pdev_bn_ul_mu_ofdma_tlv
++     */
++    HTT_UPLOAD_BN_MU_OFDMA_STATS,
++
++    /*
++     * Upload BN DL MU-OFDMA
++     * TLV: htt_stats_tx_pdev_bn_dl_mu_ofdma_tlv
++     */
++    HTT_UPLOAD_BN_DL_MU_OFDMA_STATS,
++
++    /*
++     * Upload BN UL MU-OFDMA
++     * TLV: htt_stats_tx_pdev_bn_ul_mu_ofdma_tlv
++     */
++    HTT_UPLOAD_BN_UL_MU_OFDMA_STATS,
+ } htt_mu_stats_upload_t;
+ 
+ /* htt_tx_rate_stats_upload_t
+@@ -997,11 +1019,13 @@
+     HTT_UPLOAD_AX_TXBF_OFDMA_STATS,
+ 
+     /*
+-     * Upload 11be TXBF OFDMA stats
++     * Upload 11be and 11bn TXBF OFDMA stats
+      *
+      * TLV: htt_tx_pdev_be_txbf_ofdma_stats_t
+      */
+-    HTT_UPLOAD_BE_TXBF_OFDMA_STATS,
++    HTT_UPLOAD_BE_BN_TXBF_OFDMA_STATS,
++        /* retain previous name as alias */
++        HTT_UPLOAD_BE_TXBF_OFDMA_STATS = HTT_UPLOAD_BE_BN_TXBF_OFDMA_STATS,
+ } htt_tx_pdev_txbf_ofdma_stats_upload_t;
+ 
+ /* htt_tx_pdev_puncture_stats_upload_t
+@@ -2075,6 +2099,233 @@
+ /* preserve old name alias for new name consistent with the tag name */
+ typedef htt_stats_rx_tid_details_tlv htt_rx_tid_stats_tlv;
+ 
++
++typedef struct {
++    htt_tlv_hdr_t tlv_hdr;
++
++    /**
++     * BIT [15: 0] : sw_peer_id
++     * BIT [31:16] : tid_num
++     */
++    union {
++        A_UINT32 sw_peer_id__tid_num;
++        struct {
++            A_UINT32 sw_peer_id : 16,
++                     tid_num    : 16;
++        };
++    };
++
++    /**
++     * BIT [11: 0] : Starting Sequence number of the session,
++     *               this changes whenever window moves
++     * BIT [21:12] : Points to last forwarded packet
++     */
++    union {
++        A_UINT32 ssn_current_index;
++        struct {
++            A_UINT32 ssn           : 12,
++                     current_index : 10,
++                     reserved_0    : 10;
++        };
++    };
++
++    /** Current PN number */
++    A_UINT32 pn_31_0;
++    A_UINT32 pn_63_32;
++    A_UINT32 pn_95_64;
++    A_UINT32 pn_127_96;
++
++    /**
++     * Timestamp of arrival of the last MPDU for this queue (in microseconds)
++     */
++    A_UINT32 last_rx_enqueue_timestamp_us;
++
++    /** Timestamp of forwarding an MPDU (in microseconds) */
++    A_UINT32 last_rx_dequeue_timestamp_us;
++
++    /** The number of MPDUs, MSDUs in the queue */
++    union {
++        A_UINT32 mpdu_msdu_cnt;
++        struct {
++            A_UINT32 current_mpdu_cnt : 16,
++                     current_msdu_cnt : 16;
++        };
++    };
++
++    /** The number of times the window moved more then 2K */
++    A_UINT32 window_jump_2k_cnt;
++
++    /**
++     * The number of times that REO started forwarding frames even though
++     * there is a hole in the bitmap.
++     * Forwarding reason is Timeout.
++     */
++    A_UINT32 timeout_cnt;
++
++    /**
++     * The number of times that REO started forwarding frames even though
++     * there is a hole in the bitmap.
++     * Forwarding reason is reception of BAR frame.
++     */
++    A_UINT32 forward_due_to_bar_cnt;
++
++    /** The number of duplicate frames that have been detected */
++    A_UINT32 duplicate_cnt;
++
++    /**
++     * The number of frames that have been received in order without a hole
++     * that prevented them from being forwarded immediately.
++     */
++    A_UINT32 frames_in_order_cnt;
++
++    /** The number of times a BAR frame is received. */
++    A_UINT32 bar_received_cnt;
++
++    /**
++     * The total number of MPDU frames that have been processed,
++     * this includes the duplicates.
++     */
++    A_UINT32 mpdu_frames_processed_cnt;
++
++    /**
++     * The total number of MSDU frames that have been processed,
++     * this includes the duplicates.
++     */
++    A_UINT32 msdu_frames_processed_cnt;
++
++    /**
++     * An approximation of the number of bytes received for
++     * this queue, in 64 byte units.
++     */
++    A_UINT32 total_processed_byte_cnt;
++
++    /** The number of MPDUs received after the window had already moved on */
++    A_UINT32 late_receive_mpdu_cnt;
++
++    /** The number of times a hole was created in the receive bitmap */
++    A_UINT32 hole_cnt;
++
++    /**
++     * The number of holes in the bitmap that moved due to aging
++     * counter expiry
++     */
++    A_UINT32 aging_drop_mpdu_cnt;
++
++    /**
++     * The number of times holes got removed from the bitmap due to
++     * aging counter expiry
++     */
++    A_UINT32 aging_drop_interval_cnt;
++
++    /** The number of ADDBA Req received */
++    A_UINT32 addba_req_cnt;
++
++    /** The number of ADDBA Resp replied for RX ADDBA Req */
++    A_UINT32 addba_resp_cnt;
++
++    /** The number of ADDBA Resp sent successfully */
++    A_UINT32 addba_rsp_success_cnt;
++
++    /** The number of ADDBA Resp sent failed */
++    A_UINT32 addba_rsp_fail_cnt;
++
++    /** The number of DELBA Req received */
++    A_UINT32 delba_req_cnt;
++
++    /** The number of DELBA Req sent successfully */
++    A_UINT32 delba_tx_success_cnt;
++
++    /** The number of DELBA Req sent failed */
++    A_UINT32 delba_tx_fail_cnt;
++
++    /** BA window size established */
++    A_UINT32 ba_win_size;
++
++    /** PN size established */
++    A_UINT32 pn_size;
++} htt_stats_rx_peer_tid_reo_queue_ba_tlv;
++
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_SW_PEER_ID_TID_DWORD_OFFSET 1
++
++/* Macros for sw_peer_id and tid_num */
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_SW_PEER_ID_M 0x0000ffff
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_SW_PEER_ID_S 0
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_TID_NUM_M    0xffff0000
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_TID_NUM_S    16
++
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_SW_PEER_ID_GET(_var) \
++    (((_var) & HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_SW_PEER_ID_M) >> \
++     HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_SW_PEER_ID_S)
++
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_SW_PEER_ID_SET(_var, _val) \
++    do { \
++        HTT_CHECK_SET_VAL(HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_SW_PEER_ID, _val); \
++        ((_var) |= ((_val) << HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_SW_PEER_ID_S)); \
++    } while (0)
++
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_TID_NUM_GET(_var) \
++    (((_var) & HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_TID_NUM_M) >> \
++     HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_TID_NUM_S)
++
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_TID_NUM_SET(_var, _val) \
++    do { \
++        HTT_CHECK_SET_VAL(HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_TID_NUM, _val); \
++        ((_var) |= ((_val) << HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_TID_NUM_S)); \
++    } while (0)
++
++/* Macros for ssn and current_index */
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_SSN_M           0x00000fff
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_SSN_S           0
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_CURRENT_INDEX_M 0x003ff000
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_CURRENT_INDEX_S 12
++
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_SSN_GET(_var) \
++    (((_var) & HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_SSN_M) >> \
++     HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_SSN_S)
++
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_SSN_SET(_var, _val) \
++    do { \
++        HTT_CHECK_SET_VAL(HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_SSN, _val); \
++        ((_var) |= ((_val) << HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_SSN_S)); \
++    } while (0)
++
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_CURRENT_INDEX_GET(_var) \
++    (((_var) & HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_CURRENT_INDEX_M) >> \
++     HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_CURRENT_INDEX_S)
++
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_CURRENT_INDEX_SET(_var, _val) \
++    do { \
++        HTT_CHECK_SET_VAL(HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_CURRENT_INDEX, _val); \
++        ((_var) |= ((_val) << HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_CURRENT_INDEX_S)); \
++    } while (0)
++
++/* Macros for mpdu/msdu count */
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_MPDU_CNT_M 0x0000ffff
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_MPDU_CNT_S 0
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_MSDU_CNT_M 0xffff0000
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_MSDU_CNT_S 16
++
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_MPDU_CNT_GET(_var) \
++    (((_var) & HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_MPDU_CNT_M) >> \
++     HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_MPDU_CNT_S)
++
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_MPDU_CNT_SET(_var, _val) \
++    do { \
++        HTT_CHECK_SET_VAL(HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_MPDU_CNT, _val); \
++        ((_var) |= ((_val) << HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_MPDU_CNT_S)); \
++    } while (0)
++
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_MSDU_CNT_GET(_var) \
++    (((_var) & HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_MSDU_CNT_M) >> \
++     HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_MSDU_CNT_S)
++
++#define HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_MSDU_CNT_SET(_var, _val) \
++    do { \
++        HTT_CHECK_SET_VAL(HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_MSDU_CNT, _val); \
++        ((_var) |= ((_val) << HTT_STATS_RX_PEER_TID_REO_QUEUE_BA_MSDU_CNT_S)); \
++    } while (0)
++
++
+ #define HTT_MAX_COUNTER_NAME 8
+ typedef struct {
+     htt_tlv_hdr_t tlv_hdr;
+@@ -2507,8 +2758,10 @@
+     HTT_RX_TID_STATS_TLV        = 5,
+     HTT_MSDU_FLOW_STATS_TLV     = 6,
+     HTT_PEER_SCHED_STATS_TLV    = 7,
+-    HTT_PEER_AX_OFDMA_STATS_TLV = 8,
+-    HTT_PEER_BE_OFDMA_STATS_TLV = 9,
++    HTT_PEER_OFDMA_STATS_TLV    = 8,
++        HTT_PEER_AX_OFDMA_STATS_TLV = HTT_PEER_OFDMA_STATS_TLV, /* DEPRECATED */
++    HTT_PEER_BE_OFDMA_STATS_TLV = 9,                            /* DEPRECATED */
++    HTT_PEER_RX_REO_STATS_TLV   = 10,
+ 
+     HTT_PEER_STATS_MAX_TLV      = 31,
+ } htt_peer_stats_tlv_enum;
+@@ -2531,18 +2784,46 @@
+ /* preserve old name alias for new name consistent with the tag name */
+ typedef htt_stats_peer_sched_stats_tlv htt_peer_sched_stats_tlv;
+ 
++/* Retaining the old structure defs for compatibility */
+ typedef struct {
+     htt_tlv_hdr_t tlv_hdr;
+     A_UINT32 peer_id;
+-    A_UINT32 ax_basic_trig_count;
+-    A_UINT32 ax_basic_trig_err;
+-    A_UINT32 ax_bsr_trig_count;
+-    A_UINT32 ax_bsr_trig_err;
+-    A_UINT32 ax_mu_bar_trig_count;
+-    A_UINT32 ax_mu_bar_trig_err;
+-    A_UINT32 ax_basic_trig_with_per;
+-    A_UINT32 ax_bsr_trig_with_per;
+-    A_UINT32 ax_mu_bar_trig_with_per;
++    union{
++        A_UINT32 ax_basic_trig_count; /* retaining the older alias */
++        A_UINT32 basic_trig_count;
++    };
++    union{
++        A_UINT32 ax_basic_trig_err; /* retaining the older alias */
++        A_UINT32 basic_trig_err;
++    };
++    union{
++        A_UINT32 ax_bsr_trig_count; /* retaining the older alias */
++        A_UINT32 bsr_trig_count;
++    };
++    union{
++        A_UINT32 ax_bsr_trig_err; /* retaining the older alias */
++        A_UINT32 bsr_trig_err;
++    };
++    union{
++        A_UINT32 ax_mu_bar_trig_count; /* retaining the older alias */
++        A_UINT32 mu_bar_trig_count;
++    };
++    union{
++        A_UINT32 ax_mu_bar_trig_err;  /* retaining the older alias */
++        A_UINT32 mu_bar_trig_err;
++    };
++    union{
++        A_UINT32 ax_basic_trig_with_per; /* retaining the older alias */
++        A_UINT32 basic_trig_with_per;
++    };
++    union{
++        A_UINT32 ax_bsr_trig_with_per;  /* retaining the older alias */
++        A_UINT32 bsr_trig_with_per;
++    };
++    union{
++        A_UINT32 ax_mu_bar_trig_with_per; /* retaining the older alias */
++        A_UINT32 mu_bar_trig_with_per;
++    };
+     /* is_airtime_large_for_dl_ofdma, is_airtime_large_for_ul_ofdma
+      * These fields contain 2 counters each.  The first element in each
+      * array counts how many times the airtime is short enough to use
+@@ -2554,13 +2835,22 @@
+     /* Last updated value of DL and UL queue depths for each peer per AC */
+     A_UINT32 last_updated_dl_qdepth[HTT_NUM_AC_WMM];
+     A_UINT32 last_updated_ul_qdepth[HTT_NUM_AC_WMM];
+-    /* Per peer Manual 11ax UL OFDMA trigger and trigger error counts */
+-    A_UINT32 ax_manual_ulofdma_trig_count;
+-    A_UINT32 ax_manual_ulofdma_trig_err_count;
+-} htt_stats_peer_ax_ofdma_stats_tlv;
++
++    /* Per peer Manual UL OFDMA trigger and trigger error counts */
++    union{
++        A_UINT32 ax_manual_ulofdma_trig_count;  /* retaining the older alias */
++        A_UINT32 manual_ulofdma_trig_count;
++    };
++    union{
++        A_UINT32 ax_manual_ulofdma_trig_err_count;  /* retaining the older alias */
++        A_UINT32 manual_ulofdma_trig_err_count;
++    };
++} htt_stats_peer_ofdma_stats_tlv;
+ /* preserve old name alias for new name consistent with the tag name */
+-typedef htt_stats_peer_ax_ofdma_stats_tlv htt_peer_ax_ofdma_stats_tlv;
++typedef htt_stats_peer_ofdma_stats_tlv htt_peer_ax_ofdma_stats_tlv;
++typedef htt_stats_peer_ofdma_stats_tlv htt_stats_peer_ax_ofdma_stats_tlv;
+ 
++/* DEPRECATED */
+ typedef struct {
+     htt_tlv_hdr_t tlv_hdr;
+     A_UINT32 peer_id;
+@@ -2642,7 +2932,8 @@
+  *   - HTT_STATS_PEER_MSDU_FLOWQ_TAG (multiple)
+  *   - HTT_STATS_TX_TID_DETAILS_V1_TAG (multiple)
+  *   - HTT_STATS_PEER_SCHED_STATS_TAG
+- *   - HTT_STATS_PEER_AX_OFDMA_STATS_TAG
++ *   - HTT_STATS_PEER_OFDMA_STATS_TAG / HTT_STATS_PEER_AX_OFDMA_STATS_TAG
++ *   - HTT_STATS_PEER_BE_OFDMA_STATS_TAG
+  */
+ /* NOTE:
+  * This structure is for documentation, and cannot be safely used directly.
+@@ -2661,8 +2952,12 @@
+     htt_stats_peer_msdu_flowq_tlv     msdu_flowq[1];
+     htt_stats_tx_tid_details_v1_tlv   tx_tid_stats_v1[1];
+     htt_stats_peer_sched_stats_tlv    peer_sched_stats;
+-    htt_stats_peer_ax_ofdma_stats_tlv ax_ofdma_stats;
+-    htt_stats_peer_be_ofdma_stats_tlv be_ofdma_stats;
++    union {
++        htt_stats_peer_ofdma_stats_tlv    peer_ofdma_stats;
++        /* ax_ofdma_stats: DEPRECATED, but retained as alias */
++        htt_stats_peer_ax_ofdma_stats_tlv ax_ofdma_stats;
++    };
++    htt_stats_peer_be_ofdma_stats_tlv be_ofdma_stats; /* DEPRECATED */
+ } htt_peer_stats_t;
+ #endif /* ATH_TARGET */
+ 
+@@ -3135,6 +3430,7 @@
+ #define HTT_TX_PDEV_STATS_NUM_AX_MUMIMO_USER_STATS 8
+ #define HTT_TX_PDEV_STATS_NUM_BE_MUMIMO_USER_STATS 8
+ #define HTT_TX_PDEV_STATS_NUM_OFDMA_USER_STATS 74
++#define HTT_TX_PDEV_STATS_NUM_BN_OFDMA_USER_STATS 16
+ #define HTT_TX_PDEV_STATS_NUM_UL_MUMIMO_USER_STATS 8
+ #define HTT_STATS_MAX_MUMIMO_GRP_SZ 8
+ /*
+@@ -3348,6 +3644,22 @@
+     A_UINT32 ax_mu_bar_trigger_per_ac[HTT_NUM_AC_WMM];
+     /** 11AX HE MU-BAR Trigger frames per AC completed with error(s) */
+     A_UINT32 ax_mu_bar_trigger_errors_per_ac[HTT_NUM_AC_WMM];
++    /** 11AX HE MU Combined UL OFDMA Basic Trigger frame sent over the air */
++    A_UINT32 combined_ax_ulofdma_trigger_tried[HTT_NUM_AC_WMM];
++    /** 11AX HE MU Combined UL OFDMA Basic Trigger completed with error(s) */
++    A_UINT32 combined_ax_ulofdma_trigger_err[HTT_NUM_AC_WMM];
++    /** 11AX HE MU Standalone UL OFDMA Basic Trigger frame sent over the air */
++    A_UINT32 standalone_ax_ulofdma_trigger_tried[HTT_NUM_AC_WMM];
++    /** 11AX HE MU Standalone UL OFDMA Basic Trigger completed with error(s) */
++    A_UINT32 standalone_ax_ulofdma_trigger_err[HTT_NUM_AC_WMM];
++    /** 11AX HE MU Combined UL MU-MIMO Basic Trigger frame sent over the air */
++    A_UINT32 combined_ax_ulmumimo_trigger_tried[HTT_NUM_AC_WMM];
++    /** 11AX HE MU Combined UL MU-MIMO Basic Trigger completed with error(s) */
++    A_UINT32 combined_ax_ulmumimo_trigger_err[HTT_NUM_AC_WMM];
++    /** 11AX HE MU Standalone UL MU-MIMO Basic Trigger frame sent over the air*/
++    A_UINT32 standalone_ax_ulmumimo_trigger_tried[HTT_NUM_AC_WMM];
++    /** 11AX HE MU Standalone UL MU-MIMO Basic Trigger completed with error(s)*/
++    A_UINT32 standalone_ax_ulmumimo_trigger_err[HTT_NUM_AC_WMM];
+ } htt_stats_tx_selfgen_ax_stats_tlv;
+ /* preserve old name alias for new name consistent with the tag name */
+ typedef htt_stats_tx_selfgen_ax_stats_tlv htt_tx_selfgen_ax_stats_tlv;
+@@ -3413,10 +3725,55 @@
+     A_UINT32 be_mu_bar_trigger_per_ac[HTT_NUM_AC_WMM];
+     /** 11BE EHT MU-BAR Trigger frames per AC completed with error(s) */
+     A_UINT32 be_mu_bar_trigger_errors_per_ac[HTT_NUM_AC_WMM];
++    /** 11BE EHT MU Combined UL OFDMA Basic Trigger frame sent over the air */
++    A_UINT32 combined_be_ulofdma_trigger_tried[HTT_NUM_AC_WMM];
++    /** 11BE EHT MU Combined UL OFDMA Basic Trigger completed with error(s) */
++    A_UINT32 combined_be_ulofdma_trigger_err[HTT_NUM_AC_WMM];
++    /** 11BE EHT MU Standalone UL OFDMA Basic Trigger frame sent over the air */
++    A_UINT32 standalone_be_ulofdma_trigger_tried[HTT_NUM_AC_WMM];
++    /** 11BE EHT MU Standalone UL OFDMA Basic Trigger completed with error(s) */
++    A_UINT32 standalone_be_ulofdma_trigger_err[HTT_NUM_AC_WMM];
++    /** 11BE EHT MU Combined UL MU-MIMO Basic Trigger frame sent over the air */
++    A_UINT32 combined_be_ulmumimo_trigger_tried[HTT_NUM_AC_WMM];
++    /** 11BE EHT MU Combined UL MU-MIMO Basic Trigger completed with error(s) */
++    A_UINT32 combined_be_ulmumimo_trigger_err[HTT_NUM_AC_WMM];
++    /** 11BE EHT MU Standalone UL MU-MIMO Basic Trigger frame sent over the air */
++    A_UINT32 standalone_be_ulmumimo_trigger_tried[HTT_NUM_AC_WMM];
++    /** 11BE EHT MU Standalone UL MU-MIMO Basic Trigger completed with error(s) */
++    A_UINT32 standalone_be_ulmumimo_trigger_err[HTT_NUM_AC_WMM];
+ } htt_stats_tx_selfgen_be_stats_tlv;
+ /* preserve old name alias for new name consistent with the tag name */
+ typedef htt_stats_tx_selfgen_be_stats_tlv htt_tx_selfgen_be_stats_tlv;
+ 
++typedef struct {
++    htt_tlv_hdr_t tlv_hdr;
++    /** 11bn UHR MU Basic Trigger frame sent over the air */
++    A_UINT32 bn_basic_trigger;
++    /** 11bn UHR MU BSRP Trigger frame sent over the air */
++    A_UINT32 bn_bsr_trigger;
++    /** 11bn UHR MU BAR Trigger frame sent over the air */
++    A_UINT32 bn_mu_bar_trigger;
++    /** 11bn UHR MU RTS Trigger frame sent over the air */
++    A_UINT32 bn_mu_rts_trigger;
++
++    /** 11BN UHR MU Combined Freq. BSRP Trigger frame sent over the air */
++    A_UINT32 combined_bn_bsr_trigger_tried[HTT_NUM_AC_WMM];
++    /** 11BN UHR MU Combined Freq. BSRP Trigger completed with error(s) */
++    A_UINT32 combined_bn_bsr_trigger_err[HTT_NUM_AC_WMM];
++    /** 11BN UHR MU Standalone Freq. BSRP Trigger frame sent over the air */
++    A_UINT32 standalone_bn_bsr_trigger_tried[HTT_NUM_AC_WMM];
++    /** 11BN UHR MU Standalone Freq. BSRP Trigger completed with error(s) */
++    A_UINT32 standalone_bn_bsr_trigger_err[HTT_NUM_AC_WMM];
++    /** 11BN UHR Manual Single-User UL OFDMA Trigger frame sent over the air */
++    A_UINT32 manual_bn_su_ulofdma_basic_trigger[HTT_NUM_AC_WMM];
++    /** 11BN UHR Manual Single-User UL OFDMA Trigger completed with error(s) */
++    A_UINT32 manual_bn_su_ulofdma_basic_trigger_err[HTT_NUM_AC_WMM];
++    /** 11BN UHR Manual Multi-User UL OFDMA Trigger frame sent over the air */
++    A_UINT32 manual_bn_mu_ulofdma_basic_trigger[HTT_NUM_AC_WMM];
++    /** 11BN UHR Manual Multi-User UL OFDMA Trigger completed with error(s) */
++    A_UINT32 manual_bn_mu_ulofdma_basic_trigger_err[HTT_NUM_AC_WMM];
++} htt_stats_tx_selfgen_bn_tlv;
++
+ typedef struct { /* DEPRECATED */
+     htt_tlv_hdr_t tlv_hdr;
+     /** 11AX HE OFDMA NDPA frame queued to the HW */
+@@ -3830,6 +4187,165 @@
+     A_UINT32 be_ofdma_total_cv;
+ } htt_stats_txbf_ofdma_be_parbw_tlv;
+ 
++typedef struct {
++    /** 11BN UHR OFDMA NDPA frame queued to the HW */
++    A_UINT32 bn_ofdma_ndpa_queued;
++    /** 11BN UHR OFDMA NDPA frame sent over the air */
++    A_UINT32 bn_ofdma_ndpa_tried;
++    /** 11BN UHR OFDMA NDPA frame flushed by HW */
++    A_UINT32 bn_ofdma_ndpa_flushed;
++    /** 11BN UHR OFDMA NDPA frame completed with error(s) */
++    A_UINT32 bn_ofdma_ndpa_err;
++} htt_txbf_ofdma_bn_ndpa_stats_elem_t;
++
++typedef struct {
++    htt_tlv_hdr_t tlv_hdr;
++    /**
++     * This field is populated with the num of elems in the bn_ndpa[]
++     * variable length array.
++     */
++    A_UINT32 num_elems_bn_ndpa_arr;
++    /**
++     * This field will be filled by target with value of
++     * sizeof(htt_txbf_ofdma_bn_ndpa_stats_elem_t).
++     * This is for allowing host to infer how much data target has provided,
++     * even if it using different version of the struct than what target
++     * had used.
++     */
++    A_UINT32 arr_elem_size_bn_ndpa;
++    HTT_STATS_VAR_LEN_ARRAY1(htt_txbf_ofdma_bn_ndpa_stats_elem_t, bn_ndpa);
++} htt_stats_txbf_ofdma_bn_ndpa_tlv;
++
++typedef struct {
++    /** 11BN UHR OFDMA NDP frame queued to the HW */
++    A_UINT32 bn_ofdma_ndp_queued;
++    /** 11BN UHR OFDMA NDPA frame sent over the air */
++    A_UINT32 bn_ofdma_ndp_tried;
++    /** 11BN UHR OFDMA NDPA frame flushed by HW */
++    A_UINT32 bn_ofdma_ndp_flushed;
++    /** 11BN UHR OFDMA NDPA frame completed with error(s) */
++    A_UINT32 bn_ofdma_ndp_err;
++} htt_txbf_ofdma_bn_ndp_stats_elem_t;
++
++typedef struct {
++    htt_tlv_hdr_t tlv_hdr;
++    /**
++     * This field is populated with the num of elems in the bn_ndp[]
++     * variable length array.
++     */
++    A_UINT32 num_elems_bn_ndp_arr;
++    /**
++     * This field will be filled by target with value of
++     * sizeof(htt_txbf_ofdma_bn_ndp_stats_elem_t).
++     * This is for allowing host to infer how much data target has provided,
++     * even if it using different version of the struct than what target
++     * had used.
++     */
++    A_UINT32 arr_elem_size_bn_ndp;
++    HTT_STATS_VAR_LEN_ARRAY1(htt_txbf_ofdma_bn_ndp_stats_elem_t, bn_ndp);
++} htt_stats_txbf_ofdma_bn_ndp_tlv;
++
++typedef struct {
++    /** 11BN UHR OFDMA MU BRPOLL frame queued to the HW */
++    A_UINT32 bn_ofdma_brpoll_queued;
++    /** 11BN UHR OFDMA MU BRPOLL frame sent over the air */
++    A_UINT32 bn_ofdma_brpoll_tried;
++    /** 11BN UHR OFDMA MU BRPOLL frame flushed by HW */
++    A_UINT32 bn_ofdma_brpoll_flushed;
++    /** 11BN UHR OFDMA MU BRPOLL frame completed with error(s) */
++    A_UINT32 bn_ofdma_brp_err;
++    /**
++     * Number of CBF(s) received when 11BN UHR OFDMA MU BRPOLL frame
++     * completed with error(s)
++     */
++    A_UINT32 bn_ofdma_brp_err_num_cbf_rcvd;
++} htt_txbf_ofdma_bn_brp_stats_elem_t;
++
++typedef struct {
++    htt_tlv_hdr_t tlv_hdr;
++    /**
++     * This field is populated with the num of elems in the bn_brp[]
++     * variable length array.
++     */
++    A_UINT32 num_elems_bn_brp_arr;
++    /**
++     * This field will be filled by target with value of
++     * sizeof(htt_txbf_ofdma_bn_brp_stats_elem_t).
++     * This is for allowing host to infer how much data target has provided,
++     * even if it using different version of the struct than what target
++     * had used
++     */
++    A_UINT32 arr_elem_size_bn_brp;
++    HTT_STATS_VAR_LEN_ARRAY1(htt_txbf_ofdma_bn_brp_stats_elem_t, bn_brp);
++} htt_stats_txbf_ofdma_bn_brp_tlv;
++
++typedef struct {
++    /**
++     * 11BN UHR OFDMA PPDUs that were sent over the air with steering
++     * (TXBF + OFDMA)
++     */
++    A_UINT32 bn_ofdma_num_ppdu_steer;
++    /** 11BN UHR OFDMA PPDUs that were sent over the air in open loop */
++    A_UINT32 bn_ofdma_num_ppdu_ol;
++    /**
++     * 11BN UHR OFDMA number of users for which CBF prefetch was initiated
++     * to PHY HW during TX
++     */
++    A_UINT32 bn_ofdma_num_usrs_prefetch;
++    /**
++     * 11BN UHR OFDMA number of users for which sounding was initiated
++     * during TX
++     */
++    A_UINT32 bn_ofdma_num_usrs_sound;
++    /**
++     * 11BN UHR OFDMA number of users for which sounding was forced during TX
++     */
++    A_UINT32 bn_ofdma_num_usrs_force_sound;
++} htt_txbf_ofdma_bn_steer_stats_elem_t;
++
++typedef struct {
++    htt_tlv_hdr_t tlv_hdr;
++    /**
++     * This field is populated with the num of elems in the bn_steer[]
++     * variable length array.
++     */
++    A_UINT32 num_elems_bn_steer_arr;
++    /**
++     * This field will be filled by target with value of
++     * sizeof(htt_txbf_ofdma_bn_steer_stats_elem_t).
++     * This is for allowing host to infer how much data target has provided,
++     * even if it using different version of the struct than what target
++     * had used.
++     */
++    A_UINT32 arr_elem_size_bn_steer;
++    HTT_STATS_VAR_LEN_ARRAY1(htt_txbf_ofdma_bn_steer_stats_elem_t, bn_steer);
++} htt_stats_txbf_ofdma_bn_steer_tlv;
++
++typedef struct {
++    htt_tlv_hdr_t tlv_hdr;
++    /* 11BN UHR OFDMA MPDUs tried in rbo steering */
++    A_UINT32 bn_ofdma_rbo_steer_mpdus_tried;
++    /* 11BN UHR OFDMA MPDUs failed in rbo steering */
++    A_UINT32 bn_ofdma_rbo_steer_mpdus_failed;
++    /* 11BN UHR OFDMA MPDUs tried in sifs steering */
++    A_UINT32 bn_ofdma_sifs_steer_mpdus_tried;
++    /* 11BN UHR OFDMA MPDUs failed in sifs steering */
++    A_UINT32 bn_ofdma_sifs_steer_mpdus_failed;
++} htt_stats_txbf_ofdma_bn_steer_mpdu_tlv;
++
++/* HTT_STATS_TXBF_OFDMA_BN_PARBW_TAG stats TLV:
++ * Sent by target in response to HTT_DBG_EXT_STATS_TXBF_OFDMA stats ID request.
++ */
++typedef struct {
++    htt_tlv_hdr_t tlv_hdr;
++    /* Num of UHR TxBF Partial Bandwidth soundings */
++    A_UINT32 bn_ofdma_parbw_user_snd;
++    /* Num of UHR Partial Bandwidth Sounded CVs received */
++    A_UINT32 bn_ofdma_parbw_cv;
++    /* Num of 11BN EHT Total CVs received */
++    A_UINT32 bn_ofdma_total_cv;
++} htt_stats_txbf_ofdma_bn_parbw_tlv;
++
+ /* STATS_TYPE : HTT_DBG_EXT_STATS_TXBF_OFDMA
+  * TLV_TAGS:
+  *      - HTT_STATS_TXBF_OFDMA_NDPA_STATS_TAG
+@@ -3842,6 +4358,11 @@
+  *      - HTT_STATS_TXBF_OFDMA_BE_BRP_STATS_TAG
+  *      - HTT_STATS_TXBF_OFDMA_BE_STEER_STATS_TAG
+  *      - HTT_STATS_TXBF_OFDMA_BE_STEER_MPDU_STATS_TAG
++ *      - HTT_STATS_TXBF_OFDMA_BN_NDPA_TAG
++ *      - HTT_STATS_TXBF_OFDMA_BN_NDP_TAG
++ *      - HTT_STATS_TXBF_OFDMA_BN_BRP_TAG
++ *      - HTT_STATS_TXBF_OFDMA_BN_STEER_TAG
++ *      - HTT_STATS_TXBF_OFDMA_BN_STEER_MPDU_TAG
+  */
+ 
+ typedef struct {
+@@ -3998,6 +4519,29 @@
+ /* preserve old name alias for new name consistent with the tag name */
+ typedef htt_stats_tx_selfgen_be_err_stats_tlv htt_tx_selfgen_be_err_stats_tlv;
+ 
++typedef struct {
++    htt_tlv_hdr_t tlv_hdr;
++    /** 11BN UHR MU Basic Trigger frame completed with error(s) */
++    A_UINT32 bn_basic_trigger_err;
++    /** 11BN UHR MU BSRP Trigger frame completed with error(s) */
++    A_UINT32 bn_bsr_trigger_err;
++    /** 11BN UHR MU BAR Trigger frame completed with error(s) */
++    A_UINT32 bn_mu_bar_trigger_err;
++    /** 11BN UHR MU RTS Trigger frame completed with error(s) */
++    A_UINT32 bn_mu_rts_trigger_err;
++
++    /** 11BN UHR MU OFDMA Basic Trigger frame completed with partial user response */
++    A_UINT32 bn_basic_trigger_partial_resp;
++    /** 11BN UHR MU BSRP Trigger frame completed with partial user response */
++    A_UINT32 bn_bsr_trigger_partial_resp;
++    /** 11BN UHR MU BAR Trigger frame completed with partial user response */
++    A_UINT32 bn_mu_bar_trigger_partial_resp;
++    /** 11BN UHR MU RTS Trigger frame blocked due to partner link TX/RX(eMLSR) */
++    A_UINT32 bn_mu_rts_trigger_blocked;
++    /** 11BN UHR MU BSR Trigger frame blocked due to partner link TX/RX(eMLSR) */
++    A_UINT32 bn_bsr_trigger_blocked;
++} htt_stats_tx_selfgen_bn_err_tlv;
++
+ /*
+  * Scheduler completion status reason code.
+  * (0) HTT_TXERR_NONE - No error (Success).
+@@ -4129,6 +4673,19 @@
+ typedef htt_stats_tx_selfgen_be_sched_status_stats_tlv
+     htt_tx_selfgen_be_sched_status_stats_tlv;
+ 
++typedef struct {
++    htt_tlv_hdr_t tlv_hdr;
++    /** 11BN UHR MU BAR scheduler completion status reason code */
++    A_UINT32 bn_mu_bar_sch_status[HTT_TX_PDEV_STATS_NUM_TX_ERR_STATUS];
++    /** 11BN UHR MU BAR scheduler error code */
++    A_UINT32 bn_mu_bar_sch_flag_err[HTT_TX_SELFGEN_NUM_SCH_TSFLAG_ERROR_STATS];
++
++    /** 11BN UHR UL OFDMA Basic Trigger scheduler completion status reason code */
++    A_UINT32 bn_basic_trig_sch_status[HTT_TX_PDEV_STATS_NUM_TX_ERR_STATUS];
++    /** 11BN UHR UL OFDMA Basic Trigger scheduler error code */
++    A_UINT32 bn_basic_trig_sch_flag_err[HTT_TX_SELFGEN_NUM_SCH_TSFLAG_ERROR_STATS];
++} htt_stats_tx_selfgen_bn_sched_status_tlv;
++
+ /* STATS_TYPE : HTT_DBG_EXT_STATS_TX_SELFGEN_INFO
+  * TLV_TAGS:
+  *      - HTT_STATS_TX_SELFGEN_CMN_STATS_TAG
+@@ -4141,6 +4698,9 @@
+  *      - HTT_STATS_TX_SELFGEN_BE_STATS_TAG
+  *      - HTT_STATS_TX_SELFGEN_BE_ERR_STATS_TAG
+  *      - HTT_STATS_TX_SELFGEN_BE_SCHED_STATUS_STATS_TAG
++ *      - HTT_STATS_TX_SELFGEN_BN_TAG
++ *      - HTT_STATS_TX_SELFGEN_BN_ERR_TAG
++ *      - HTT_STATS_TX_SELFGEN_BN_SCHED_STATUS_TAG
+  */
+ /* NOTE:
+  * This structure is for documentation, and cannot be safely used directly.
+@@ -4158,6 +4718,9 @@
+     htt_stats_tx_selfgen_be_stats_tlv be_tlv;
+     htt_stats_tx_selfgen_be_err_stats_tlv be_err_tlv;
+     htt_stats_tx_selfgen_be_sched_status_stats_tlv be_sched_status_tlv;
++    htt_stats_tx_selfgen_bn_tlv bn_tlv;
++    htt_stats_tx_selfgen_bn_err_tlv bn_err_tlv;
++    htt_stats_tx_selfgen_bn_sched_status_tlv bn_sched_status_tlv;
+ } htt_tx_pdev_selfgen_stats_t;
+ #endif /* ATH_TARGET */
+ 
+@@ -4297,6 +4860,12 @@
+ 
+ typedef struct {
+     htt_tlv_hdr_t tlv_hdr;
++    /** Represents the count for 11BN DL MU OFDMA sequences */
++    A_UINT32 bn_mu_ofdma_sch_nusers[HTT_TX_PDEV_STATS_NUM_BN_OFDMA_USER_STATS];
++} htt_stats_tx_pdev_bn_dl_mu_ofdma_tlv;
++
++typedef struct {
++    htt_tlv_hdr_t tlv_hdr;
+     /**
+      * Represents the count for 11AX UL MU OFDMA sequences with Basic Triggers
+      */
+@@ -4344,6 +4913,25 @@
+ typedef struct {
+     htt_tlv_hdr_t tlv_hdr;
+     /**
++     * Represents the count for 11BN UL MU OFDMA sequences with Basic Triggers
++     */
++    A_UINT32 bn_ul_mu_ofdma_basic_sch_nusers[HTT_TX_PDEV_STATS_NUM_BN_OFDMA_USER_STATS];
++    /**
++     * Represents the count for 11BN UL MU OFDMA sequences with BSRP Triggers
++     */
++    A_UINT32 bn_ul_mu_ofdma_bsr_sch_nusers[HTT_TX_PDEV_STATS_NUM_BN_OFDMA_USER_STATS];
++    /**
++     * Represents the count for 11BN UL MU OFDMA sequences with BAR Triggers
++     */
++    A_UINT32 bn_ul_mu_ofdma_bar_sch_nusers[HTT_TX_PDEV_STATS_NUM_BN_OFDMA_USER_STATS];
++    /**
++     * TODO_BORON_OFDMA : Add array for BN_BRP number of users
++     */
++} htt_stats_tx_pdev_bn_ul_mu_ofdma_tlv;
++
++typedef struct {
++    htt_tlv_hdr_t tlv_hdr;
++    /**
+      * Represents the count for 11AX UL MU MIMO sequences with Basic Triggers
+      */
+     A_UINT32 ax_ul_mu_mimo_basic_sch_nusers[HTT_TX_PDEV_STATS_NUM_UL_MUMIMO_USER_STATS];
+@@ -4427,6 +5015,7 @@
+ #define HTT_STATS_TX_SCHED_MODE_MU_OFDMA_AX 3 /* SCHED_TX_MODE_MU_OFDMA_AX */
+ #define HTT_STATS_TX_SCHED_MODE_MU_OFDMA_BE 4 /* SCHED_TX_MODE_MU_OFDMA_BE */
+ #define HTT_STATS_TX_SCHED_MODE_MU_MIMO_BE  5 /* SCHED_TX_MODE_MU_MIMO_BE */
++#define HTT_STATS_TX_SCHED_MODE_MU_OFDMA_BN 6 /* SCHED_TX_MODE_MU_OFDMA_BN */
+ 
+ typedef struct {
+     htt_tlv_hdr_t tlv_hdr;
+@@ -5996,6 +6585,7 @@
+ #define HTT_TX_PDEV_STATS_NUM_LTF 4
+ #define HTT_TX_PDEV_STATS_NUM_11AX_TRIGGER_TYPES 6
+ #define HTT_TX_PDEV_STATS_NUM_11BE_TRIGGER_TYPES 6
++#define HTT_TX_PDEV_STATS_NUM_11BN_TRIGGER_TYPES 6
+ #define HTT_TX_VDEV_STATS_NUM_SPATIAL_STREAMS 4
+ #define HTT_TX_NUM_OF_SOUNDING_STATS_WORDS \
+     (HTT_TX_PDEV_STATS_NUM_BW_COUNTERS * \
+@@ -6014,6 +6604,19 @@
+         ((_var) |= ((_val) << HTT_TX_PDEV_RATE_STATS_MAC_ID_S)); \
+     } while (0)
+ 
++#define HTT_TX_PDEV_RATE_STATS_WIFI_VERSION_M 0x00000f00
++#define HTT_TX_PDEV_RATE_STATS_WIFI_VERSION_S 8
++
++#define HTT_TX_PDEV_RATE_STATS_WIFI_VERSION_GET(_var) \
++    (((_var) & HTT_TX_PDEV_RATE_STATS_WIFI_VERSION_M) >> \
++     HTT_TX_PDEV_RATE_STATS_WIFI_VERSION_S)
++
++#define HTT_TX_PDEV_RATE_STATS_WIFI_VERSION_SET(_var, _val) \
++    do { \
++        HTT_CHECK_SET_VAL(HTT_TX_PDEV_RATE_STATS_WIFI_VERSION, _val); \
++        ((_var) |= ((_val) << HTT_TX_PDEV_RATE_STATS_WIFI_VERSION_S)); \
++    } while (0)
++
+ #define HTT_TX_PDEV_STATS_NUM_MCS_DROP_COUNTERS \
+     (HTT_TX_PDEV_STATS_NUM_MCS_COUNTERS + \
+      HTT_TX_PDEV_STATS_NUM_EXTRA_MCS_COUNTERS + \
+@@ -6081,17 +6684,33 @@
+ #define HTT_TX_PDEV_STATS_NUM_BN_RU_SIZE_COUNTERS \
+     HTT_TX_PDEV_STATS_NUM_BE_RU_SIZE_COUNTERS
+ 
++typedef enum {
++    HTT_WIFI_VER_UNKNOWN = 0,
++    HTT_WIFI_VER_11N  = 4,
++    HTT_WIFI_VER_11AC = 5,
++    HTT_WIFI_VER_11AX = 6,
++    HTT_WIFI_VER_11BE = 7,
++    HTT_WIFI_VER_11BN = 8,
++} HTT_RX_TX_PDEV_STATS_WIFI_VERSION;
++
+ typedef struct {
+     htt_tlv_hdr_t tlv_hdr;
+ 
+     /**
+      * BIT [ 7 :  0]   :- mac_id
+-     * BIT [31 :  8]   :- reserved
++     * BIT [11 :  8]   :- wifi_version
++     * BIT [31 : 12]   :- reserved
+      */
+     union {
+         struct {
+-            A_UINT32 mac_id:    8,
+-                     reserved: 24;
++            A_UINT32 mac_id:        8,
++                     /* wifi_version:
++                      * Holds a HTT_RX_TX_PDEV_STATS_WIFI_VERSION value.
++                      * Refer to HTT_TX_PDEV_RATE_STATS_WIFI_VERSION_GET
++                      * / _SET macros for accessing this bitfield.
++                      */
++                     wifi_version:  4,
++                     reserved:     20;
+         };
+         A_UINT32 mac_id__word;
+     };
+@@ -6217,7 +6836,7 @@
+     A_UINT32 ax_su_embedded_trigger_data_ppdu;
+     /** 11AX HE SU data + embedded trigger PPDU failure stats (stats for HETP ack failure PPDU cnt) */
+     A_UINT32 ax_su_embedded_trigger_data_ppdu_err;
+-    /** sta side trigger stats */
++    /** STA side trigger stats */
+     A_UINT32 trigger_type_11be[HTT_TX_PDEV_STATS_NUM_11BE_TRIGGER_TYPES];
+     /** Stats for Extra EHT LTF */
+     A_UINT32 extra_eht_ltf;
+@@ -6225,6 +6844,27 @@
+     A_UINT32 extra_eht_ltf_ofdma;
+     /** 11AX HE UL_BA RU Size stats */
+     A_UINT32 ofdma_ba_ru_size[HTT_TX_PDEV_STATS_NUM_AX_RU_SIZE_COUNTERS];
++    /** Number of tx 2xldpc packets */
++    A_UINT32 tx_2xldpc;
++    A_UINT32 rc_state_probe_mismatched;
++    /* npca_tx_bw: NPCA bw info
++     * element 0:  20 MHz
++     * element 1:  40 MHz
++     * element 2:  80 MHz
++     * element 3: 160 MHz
++     * element 4: 320 MHz
++     */
++    A_UINT32 npca_tx_bw[HTT_TX_PDEV_STATS_NUM_BN_BW_COUNTERS];
++    /* npca_tx_su_punctured_mode: NPCA punctured mode info
++     * element 0:      no puncture
++     * element 1:  20 MHz punctured
++     * element 2:  40 MHz punctured
++     * element 3:  80 MHz punctured
++     * element 4: 120 MHz punctured
++     */
++    A_UINT32 npca_tx_su_punctured_mode[HTT_TX_PDEV_STATS_NUM_PUNCTURED_MODE_COUNTERS];
++    /* STA side trigger stats */
++    A_UINT32 trigger_type_11bn[HTT_TX_PDEV_STATS_NUM_11BN_TRIGGER_TYPES];
+ } htt_stats_tx_pdev_rate_stats_tlv;
+ /* preserve old name alias for new name consistent with the tag name */
+ typedef htt_stats_tx_pdev_rate_stats_tlv htt_tx_pdev_rate_stats_tlv;
+@@ -6710,6 +7350,19 @@
+ } htt_rx_pdev_rate_stats_t;
+ #endif /* ATH_TARGET */
+ 
++#define HTT_RX_EXT_PDEV_RATE_STATS_WIFI_VERSION_M 0x0000000f
++#define HTT_RX_EXT_PDEV_RATE_STATS_WIFI_VERSION_S 0
++
++#define HTT_RX_EXT_PDEV_RATE_STATS_WIFI_VERSION_GET(_var) \
++    (((_var) & HTT_RX_EXT_PDEV_RATE_STATS_WIFI_VERSION_M) >> \
++     HTT_RX_EXT_PDEV_RATE_STATS_WIFI_VERSION_S)
++
++#define HTT_RX_EXT_PDEV_RATE_STATS_WIFI_VERSION_SET(_var, _val) \
++    do { \
++        HTT_CHECK_SET_VAL(HTT_RX_EXT_PDEV_RATE_STATS_WIFI_VERSION, _val); \
++        ((_var) |= ((_val) << HTT_RX_EXT_PDEV_RATE_STATS_WIFI_VERSION_S)); \
++    } while (0)
++
+ typedef struct {
+     htt_tlv_hdr_t tlv_hdr;
+     /** units = dB above noise floor */
+@@ -6739,6 +7392,27 @@
+     A_UINT32 reduced_rx_bw[HTT_RX_PDEV_STATS_NUM_REDUCED_CHAN_TYPES][HTT_RX_PDEV_STATS_NUM_BW_COUNTERS];
+     A_UINT8  rssi_chain_ext_2[HTT_RX_PDEV_STATS_NUM_SPATIAL_STREAMS][HTT_RX_PDEV_STATS_NUM_BW_EXT_2_COUNTERS]; /* units = dB above noise floor */
+     A_INT8   rx_per_chain_rssi_ext_2_in_dbm[HTT_RX_PDEV_STATS_NUM_SPATIAL_STREAMS][HTT_RX_PDEV_STATS_NUM_BW_EXT_2_COUNTERS];
++    /**
++     * BIT [ 3 :  0]   :- wifi_version
++     * BIT [31 :  4]   :- reserved
++     */
++    union {
++        struct {
++            A_UINT32
++                     /* wifi_version:
++                      * Holds a HTT_RX_TX_PDEV_STATS_WIFI_VERSION value.
++                      * Refer to HTT_RX_EXT_PDEV_RATE_STATS_WIFI_VERSION_GET
++                      * / _SET macros for accessing this bitfield.
++                      */
++                     wifi_version:  4,
++                     reserved:     28;
++        };
++        A_UINT32 wifi_version__word;
++    };
++    /** Number of rx 2xldpc packets */
++    A_UINT32 rx_2xldpc;
++    A_UINT32 npca_rx_bw_ext[HTT_RX_PDEV_STATS_NUM_BN_BW_COUNTERS];
++    A_UINT32 npca_rx_su_punctured_mode[HTT_RX_PDEV_STATS_NUM_PUNCTURED_MODE_COUNTERS];
+ } htt_stats_rx_pdev_rate_ext_stats_tlv;
+ /* preserve old name alias for new name consistent with the tag name */
+ typedef htt_stats_rx_pdev_rate_ext_stats_tlv htt_rx_pdev_rate_ext_stats_tlv;
+@@ -8679,6 +9353,33 @@
+     HTT_STATS_RU_TYPE_SINGLE_AND_MULTI_RU = 2,
+ } htt_stats_ru_type;
+ 
++typedef enum {
++    HTT_TX_PER_RATE_STATS_LOW_QUEUE_DEPTH = 0,
++    HTT_TX_PER_RATE_STATS_HIGH_QUEUE_DEPTH = 1,
++
++    HTT_TX_PER_RATE_STATS_NUM_QUEUE_DEPTH_COUNTERS = 2
++} HTT_TX_PER_RATE_STATS_NUM_QUEUE_DEPTH_TYPE;
++
++typedef enum {
++    HTT_TX_PER_RATE_STATS_MLO_RA_DD_NO_MCS_DROP = 0,
++    HTT_TX_PER_RATE_STATS_MLO_RA_DD_ONE_OR_MORE_MCS_DROP = 1,
++
++    HTT_TX_PER_RATE_STATS_NUM_MLO_RA_DD_MCS_DROP_COUNTERS = 2
++} HTT_TX_PER_RATE_STATS_NUM_MLO_RA_DD_MCS_DROP_TYPE;
++
++#define HTT_PER_RATE_STATS_WIFI_VERSION_M 0x0000000f
++#define HTT_PER_RATE_STATS_WIFI_VERSION_S 0
++
++#define HTT_PER_RATE_STATS_WIFI_VERSION_GET(_var) \
++    (((_var) & HTT_PER_RATE_STATS_WIFI_VERSION_M) >> \
++     HTT_PER_RATE_STATS_WIFI_VERSION_S)
++
++#define HTT_PER_RATE_STATS_WIFI_VERSION_SET(_var, _val) \
++    do { \
++        HTT_CHECK_SET_VAL(HTT_PER_RATE_STATS_WIFI_VERSION, _val); \
++        ((_var) |= ((_val) << HTT_PER_RATE_STATS_WIFI_VERSION_S)); \
++    } while (0)
++
+ typedef struct {
+     htt_tlv_hdr_t tlv_hdr;
+ 
+@@ -8706,6 +9407,41 @@
+     htt_tx_rate_stats_t per_ru[HTT_TX_PDEV_STATS_NUM_BE_RU_SIZE_COUNTERS];
+ 
+     htt_tx_rate_stats_t per_tx_su_punctured_mode[HTT_TX_PDEV_STATS_NUM_PUNCTURED_MODE_COUNTERS];
++
++    /* mlo_ra_queue_depth_status:
++     * MLO SU Tx low/high queue depth PPDU counter,
++     *     mlo_ra_queue_depth_status[0]: lowq depth
++     *     mlo_ra_queue_depth_status[1]: high queue depth
++     */
++    A_UINT32 mlo_ra_queue_depth_status[HTT_TX_PER_RATE_STATS_NUM_QUEUE_DEPTH_COUNTERS];
++    /* mlo_rate_drop_down:
++     * MLO RA MCS drop counter,
++     *     mlo_rate_drop_down[0]: No MCS drop
++     *     mlo_rate_drop_down[1]: MCS drop counter
++     */
++    A_UINT32 mlo_rate_drop_down[HTT_TX_PER_RATE_STATS_NUM_MLO_RA_DD_MCS_DROP_COUNTERS];
++
++    /**
++     * BIT [ 3 :  0]   :- wifi_version
++     * BIT [31 :  4]   :- reserved
++     */
++    union {
++        struct {
++            A_UINT32
++                /* wifi_version:
++                 * Holds a HTT_RX_TX_PDEV_STATS_WIFI_VERSION value.
++                 * Refer to HTT_PER_RATE_STATS_WIFI_VERSION_GET
++                 * / _SET macros for accessing this bitfield.
++                 */
++                wifi_version:  4,
++                reserved:     28;
++        };
++        A_UINT32 wifi_version__word;
++    };
++
++    htt_tx_rate_stats_t npca_per_bw[HTT_TX_PDEV_STATS_NUM_BN_BW_COUNTERS];
++
++    htt_tx_rate_stats_t npca_per_tx_su_punctured_mode[HTT_TX_PDEV_STATS_NUM_PUNCTURED_MODE_COUNTERS];
+ } htt_stats_per_rate_stats_tlv;
+ /* preserve old name alias for new name consistent with the tag name */
+ typedef htt_stats_per_rate_stats_tlv htt_tx_rate_stats_per_tlv;
+@@ -9746,6 +10482,29 @@
+     A_UINT32 num_terminate_seq_inefficient;
+     /* Histogram of sequence inefficiency */
+     A_UINT32 hist_seq_efficiency[HTT_STATS_SEQ_EFFICIENCY_HISTOGRAM];
++    /* CTS2SELF sequences posted */
++    A_UINT32 num_cts2self_ulmumimo_seq_posted;
++    /* Number of times ULMUMIMO classification is set to high */
++    A_UINT32 num_ulmumimo_high_traffic;
++    /* Number of times ULMUMIMO classification is set to medium */
++    A_UINT32 num_ulmumimo_medium_traffic;
++    /* Number of times ULMUMIMO classification is set to low */
++    A_UINT32 num_ulmumimo_low_traffic;
++    /*
++     * Number of times ULMUMIMO sequence is terminated
++     * for high traffic classification
++     */
++    A_UINT32 num_terminate_seq_high_traffic;
++    /*
++     * Number of times ULMUMIMO sequence is terminated
++     * for medium traffic classification
++     */
++    A_UINT32 num_terminate_seq_medium_traffic;
++    /*
++     * Number of times ULMUMIMO sequence is terminated
++     * for low traffic classification
++     */
++    A_UINT32 num_terminate_seq_low_traffic;
+ } htt_stats_pdev_ulmumimo_seq_term_stats_tlv;
+ 
+ #define HTT_STATS_MAX_ULMUMIMO_TRIGGERS 6
+@@ -12714,6 +13473,9 @@
+ #define HTT_BW_MGR_STATS_STATIC_PATTERN_M       0x00ffff00
+ #define HTT_BW_MGR_STATS_STATIC_PATTERN_S       8
+ 
++#define HTT_BW_MGR_STATS_WIFI_VERSION_M         0x0000000f
++#define HTT_BW_MGR_STATS_WIFI_VERSION_S         0
++
+ #define HTT_BW_MGR_STATS_MAC_ID_GET(_var) \
+     (((_var) & HTT_BW_MGR_STATS_MAC_ID_M) >> \
+      HTT_BW_MGR_STATS_MAC_ID_S)
+@@ -12728,69 +13490,103 @@
+ #define HTT_BW_MGR_STATS_PRI20_IDX_GET(_var) \
+     (((_var) & HTT_BW_MGR_STATS_PRI20_IDX_M) >> \
+      HTT_BW_MGR_STATS_PRI20_IDX_S)
++#define HTT_BW_MGR_STATS_NPCA_PRI20_IDX_GET(_var) \
++     HTT_BW_MGR_STATS_PRI20_IDX_GET(_var)
+ 
+ #define HTT_BW_MGR_STATS_PRI20_IDX_SET(_var, _val) \
+     do { \
+         HTT_CHECK_SET_VAL(HTT_BW_MGR_STATS_PRI20_IDX, _val); \
+         ((_var) |= ((_val) << HTT_BW_MGR_STATS_PRI20_IDX_S)); \
+     } while (0)
++#define HTT_BW_MGR_STATS_NPCA_PRI20_IDX_SET(_var, _val) \
++    HTT_BW_MGR_STATS_PRI20_IDX_SET(_var, _val)
+ 
+ 
+ #define HTT_BW_MGR_STATS_PRI20_FREQ_GET(_var) \
+     (((_var) & HTT_BW_MGR_STATS_PRI20_FREQ_M) >> \
+      HTT_BW_MGR_STATS_PRI20_FREQ_S)
++#define HTT_BW_MGR_STATS_NPCA_PRI20_FREQ_GET(_var) \
++    HTT_BW_MGR_STATS_PRI20_FREQ_GET(_var)
+ 
+ #define HTT_BW_MGR_STATS_PRI20_FREQ_SET(_var, _val) \
+     do { \
+         HTT_CHECK_SET_VAL(HTT_BW_MGR_STATS_PRI20_FREQ, _val); \
+         ((_var) |= ((_val) << HTT_BW_MGR_STATS_PRI20_FREQ_S)); \
+     } while (0)
++#define HTT_BW_MGR_STATS_NPCA_PRI20_FREQ_SET(_var, _val) \
++    HTT_BW_MGR_STATS_PRI20_FREQ_SET(_var, _val)
+ 
+ 
+ #define HTT_BW_MGR_STATS_CENTER_FREQ1_GET(_var) \
+     (((_var) & HTT_BW_MGR_STATS_CENTER_FREQ1_M) >> \
+      HTT_BW_MGR_STATS_CENTER_FREQ1_S)
++#define HTT_BW_MGR_STATS_NPCA_CENTER_FREQ1_GET(_var) \
++    HTT_BW_MGR_STATS_CENTER_FREQ1_GET(_var)
+ 
+ #define HTT_BW_MGR_STATS_CENTER_FREQ1_SET(_var, _val) \
+     do { \
+         HTT_CHECK_SET_VAL(HTT_BW_MGR_STATS_CENTER_FREQ1, _val); \
+         ((_var) |= ((_val) << HTT_BW_MGR_STATS_CENTER_FREQ1_S)); \
+     } while (0)
++#define HTT_BW_MGR_STATS_NPCA_CENTER_FREQ1_SET(_var, _val) \
++    HTT_BW_MGR_STATS_CENTER_FREQ1_SET(_var, _val)
+ 
+ 
+ #define HTT_BW_MGR_STATS_CENTER_FREQ2_GET(_var) \
+     (((_var) & HTT_BW_MGR_STATS_CENTER_FREQ2_M) >> \
+      HTT_BW_MGR_STATS_CENTER_FREQ2_S)
++#define HTT_BW_MGR_STATS_NPCA_CENTER_FREQ2_GET(_var) \
++    HTT_BW_MGR_STATS_CENTER_FREQ2_GET(_var)
+ 
+ #define HTT_BW_MGR_STATS_CENTER_FREQ2_SET(_var, _val) \
+     do { \
+         HTT_CHECK_SET_VAL(HTT_BW_MGR_STATS_CENTER_FREQ2, _val); \
+         ((_var) |= ((_val) << HTT_BW_MGR_STATS_CENTER_FREQ2_S)); \
+     } while (0)
++#define HTT_BW_MGR_STATS_NPCA_CENTER_FREQ2_SET(_var, _val) \
++    HTT_BW_MGR_STATS_CENTER_FREQ2_SET(_var, _val)
+ 
+ 
+ #define HTT_BW_MGR_STATS_CHAN_PHY_MODE_GET(_var) \
+     (((_var) & HTT_BW_MGR_STATS_CHAN_PHY_MODE_M) >> \
+      HTT_BW_MGR_STATS_CHAN_PHY_MODE_S)
++#define HTT_BW_MGR_STATS_CHAN_NPCA_PHY_MODE_GET(_var) \
++    HTT_BW_MGR_STATS_CHAN_PHY_MODE_GET(_var)
+ 
+ #define HTT_BW_MGR_STATS_CHAN_PHY_MODE_SET(_var, _val) \
+     do { \
+         HTT_CHECK_SET_VAL(HTT_BW_MGR_STATS_CHAN_PHY_MODE, _val); \
+         ((_var) |= ((_val) << HTT_BW_MGR_STATS_CHAN_PHY_MODE_S)); \
+     } while (0)
++#define HTT_BW_MGR_STATS_CHAN_NPCA_PHY_MODE_SET(_var, _val) \
++    HTT_BW_MGR_STATS_CHAN_PHY_MODE_SET(_var, _val)
+ 
+ 
+ #define HTT_BW_MGR_STATS_STATIC_PATTERN_GET(_var) \
+     (((_var) & HTT_BW_MGR_STATS_STATIC_PATTERN_M) >> \
+      HTT_BW_MGR_STATS_STATIC_PATTERN_S)
++#define HTT_BW_MGR_STATS_NPCA_STATIC_PATTERN_GET(_var) \
++     HTT_BW_MGR_STATS_STATIC_PATTERN_GET(_var)
+ 
+ #define HTT_BW_MGR_STATS_STATIC_PATTERN_SET(_var, _val) \
+     do { \
+         HTT_CHECK_SET_VAL(HTT_BW_MGR_STATS_STATIC_PATTERN, _val); \
+         ((_var) |= ((_val) << HTT_BW_MGR_STATS_STATIC_PATTERN_S)); \
+     } while (0)
++#define HTT_BW_MGR_STATS_NPCA_STATIC_PATTERN_SET(_var, _val) \
++     HTT_BW_MGR_STATS_STATIC_PATTERN_SET(_var, _val)
+ 
+ 
++#define HTT_BW_MGR_STATS_WIFI_VERSION_GET(_var) \
++    (((_var) & HTT_BW_MGR_STATS_WIFI_VERSION_M) >> \
++     HTT_BW_MGR_STATS_WIFI_VERSION_S)
++
++#define HTT_BW_MGR_STATS_WIFI_VERSION_SET(_var, _val) \
++    do { \
++        HTT_CHECK_SET_VAL(HTT_BW_MGR_STATS_WIFI_VERSION, _val); \
++        ((_var) |= ((_val) << HTT_BW_MGR_STATS_WIFI_VERSION_S)); \
++    } while (0)
++
+ typedef struct {
+     htt_tlv_hdr_t tlv_hdr;
+ 
+@@ -12828,6 +13624,45 @@
+             A_UINT32 reserved : 8;
+         };
+         A_UINT32 phy_mode__static_pattern;
++    };
++
++    /*
++     * BIT [ 3 :  0]   :- wifi_version
++     * BIT [ 7  :  4]  :- Reserved
++     * BIT [ 15 :  8]  :- NPCA_pri20_index
++     * BIT [ 31 : 16]  :- NPCA_pri20_freq in Mhz
++     */
++    union {
++        struct {
++            A_UINT32 wifi_version        :  4;
++            A_UINT32 reserved2           :  4;
++            A_UINT32 npca_pri20_idx      :  8;
++            A_UINT32 npca_pri20_freq_mhz : 16;
++        };
++        A_UINT32 npca__wifi_version__pri20_idx__freq;
++    };
++
++    /* BIT [ 15 :  0]  :- NPCA_centre_freq1
++     * BIT [ 31 : 16]  :- NPCA_centre_freq2
++     */
++    union {
++        struct {
++            A_UINT32 npca_centre_freq1 : 16;
++            A_UINT32 npca_centre_freq2 : 16;
++        };
++        A_UINT32 npca__centre_freq1__freq2;
++    };
++
++    /* BIT [ 7 :  0]  :- NPCA_channel_phy_mode
++     * BIT [ 23 : 8]  :- NPCA_pattern
++     */
++    union {
++        struct {
++            A_UINT32 npca_phy_mode       :  8;
++            A_UINT32 npca_static_pattern : 16;
++            A_UINT32 reserved3           :  8;
++        };
++        A_UINT32 npca__phy_mode__static_pattern;
+     };
+ } htt_stats_pdev_bw_mgr_stats_tlv;
+ /* preserve old name alias for new name consistent with the tag name */
+diff -ruN a/fw/wlan_defs.h b/fw/wlan_defs.h
+--- a/fw/wlan_defs.h
++++ b/fw/wlan_defs.h
+@@ -270,6 +270,13 @@
+         ((mode) == MODE_11BE_EHT320)    || \
+         ((mode) == MODE_11BE_EHT20_2G)  || \
+         ((mode) == MODE_11BE_EHT40_2G))
++#define IS_MODE_EHT_5G_6G(mode) (((mode) == MODE_11BE_EHT20) || \
++        ((mode) == MODE_11BE_EHT40)     || \
++        ((mode) == MODE_11BE_EHT80)     || \
++        ((mode) == MODE_11BE_EHT80_80)  || \
++        ((mode) == MODE_11BE_EHT160)    || \
++        ((mode) == MODE_11BE_EHT160_160)|| \
++        ((mode) == MODE_11BE_EHT320))
+ #define IS_MODE_EHT_2G(mode) (((mode) == MODE_11BE_EHT20_2G) || \
+         ((mode) == MODE_11BE_EHT40_2G))
+ #endif /* SUPPORT_11BE */
+@@ -284,6 +291,13 @@
+         ((mode) == MODE_11BN_UHR320)    || \
+         ((mode) == MODE_11BN_UHR20_2G)  || \
+         ((mode) == MODE_11BN_UHR40_2G))
++#define IS_MODE_UHR_5G_6G(mode) (((mode) == MODE_11BN_UHR20) || \
++        ((mode) == MODE_11BN_UHR40)     || \
++        ((mode) == MODE_11BN_UHR80)     || \
++        ((mode) == MODE_11BN_UHR80_80)  || \
++        ((mode) == MODE_11BN_UHR160)    || \
++        ((mode) == MODE_11BN_UHR160_160)|| \
++        ((mode) == MODE_11BN_UHR320))
+ #define IS_MODE_UHR_2G(mode) (((mode) == MODE_11BN_UHR20_2G) || \
+         ((mode) == MODE_11BN_UHR40_2G))
+ #endif /* SUPPORT_11BN */
+diff -ruN a/fw/wmi_services.h b/fw/wmi_services.h
+--- a/fw/wmi_services.h
++++ b/fw/wmi_services.h
+@@ -718,6 +718,11 @@
+ 
+     WMI_SERVICE_11BN = 458, /* Indicates FW supports 802.11bn */
+     WMI_SERVICE_HOST_AWARE_POWERSAVE = 459, /* FW supports indicating the powerstate of FW to host */
++    WMI_SERVICE_PDEV_DIV_STATES_REPORT = 460, /* FW supports reporting antenna diversity states */
++    WMI_SERVICE_EAPOL_OVER_RAW = 461, /* FW supports sending EAPOL frames in raw mode even when the vdev is brought up in nwifi/ethernet mode */
++    WMI_SERVICE_MLO_SAP_LINK_REMOVAL_SUPPORT = 462, /* Indicates FW supports MLO SAP link removal operation */
++    WMI_SERVICE_TX_POWER_LIMIT = 463, /* FW supports temporary tx power limit indication to HALPHY */
++    WMI_SERVICE_NPCA_SUPPORT = 464, /* Indicates FW supports NPCA (Non-Primary Channel Access) */
+ 
+ 
+     WMI_MAX_EXT2_SERVICE
+diff -ruN a/fw/wmi_tlv_defs.h b/fw/wmi_tlv_defs.h
+--- a/fw/wmi_tlv_defs.h
++++ b/fw/wmi_tlv_defs.h
+@@ -1497,6 +1497,19 @@
+     WMITLV_TAG_STRUC_wmi_peer_assoc_mgmt_mpduq_params,
+     WMITLV_TAG_STRUC_wmi_peer_assoc_mgmt_msduq_params,
+     WMITLV_TAG_STRUC_wmi_peer_assoc_hol_mdsuq_params,
++    WMITLV_TAG_STRUC_wmi_peer_tid_rate_custom_cmd_fixed_param,
++    WMITLV_TAG_STRUC_wmi_co_located_chan_info,
++    WMITLV_TAG_STRUC_wmi_pdev_npca_ap_cap_cmd_fixed_param,
++    WMITLV_TAG_STRUC_wmi_peer_npca_cap_params,
++    WMITLV_TAG_STRUC_wmi_peer_npca_cap_cmd_fixed_param,
++    WMITLV_TAG_STRUC_wmi_pdev_npca_ap_cap_resp_event_fixed_param,
++    WMITLV_TAG_STRUC_wmi_wfa_config_ml,
++    WMITLV_TAG_STRUC_wmi_pdev_multi_vdev_get_ac_queue_depth_cmd_fixed_param,
++    WMITLV_TAG_STRUC_wmi_pdev_multi_vdev_ac_queue_depth_event_fixed_param,
++    WMITLV_TAG_STRUC_wmi_vdev_ac_info,
++    WMITLV_TAG_STRUC_wmi_vdev_get_tpc_ie_power_cmd_fixed_param,
++    WMITLV_TAG_STRUC_wmi_vdev_tpc_ie_power_event_fixed_param,
++    WMITLV_TAG_STRUC_wmi_pdev_coex_stats,
+ } WMITLV_TAG_ID;
+ /*
+  * IMPORTANT: Please add _ALL_ WMI Commands Here.
+@@ -2068,6 +2081,11 @@
+     OP(WMI_ENERGY_MGMT_EDPS_CONFIG_CMDID) \
+     OP(WMI_ENERGY_MGMT_PUO_CONFIG_CMDID) \
+     OP(WMI_ENERGY_MGMT_ECO_MODE_CONFIG_CMDID) \
++    OP(WMI_PEER_TID_RATE_CUSTOM_CMDID) \
++    OP(WMI_PDEV_NPCA_AP_CAP_CMDID) \
++    OP(WMI_PEER_NPCA_CAP_CMDID) \
++    OP(WMI_PDEV_MULTI_VDEV_GET_AC_QUEUE_DEPTH_CMDID) \
++    OP(WMI_VDEV_GET_TPC_IE_POWER_CMDID) \
+     /* add new CMD_LIST elements above this line */
+ 
+ 
+@@ -2405,6 +2423,9 @@
+     OP(WMI_OPT_DP_DIAG_EVENTID) \
+     OP(WMI_HW_BLACKLIST_CHAN_EVENTID) \
+     OP(WMI_PDEV_SUSPEND_EVENTID) \
++    OP(WMI_PDEV_NPCA_AP_CAP_RESP_EVENTID) \
++    OP(WMI_PDEV_MULTI_VDEV_AC_QUEUE_DEPTH_EVENTID) \
++    OP(WMI_VDEV_TPC_IE_POWER_EVENTID) \
+     /* add new EVT_LIST elements above this line */
+ 
+ 
+@@ -2902,10 +2923,13 @@
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_peer_assoc_mlo_partner_link_params, partner_link_params, WMITLV_SIZE_VAR) \
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_peer_assoc_tid_to_link_map, peer_tid_to_link_map, WMITLV_SIZE_VAR) \
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_peer_assoc_operating_mode_params, operating_mode_params, WMITLV_SIZE_VAR) \
+-    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_STRUC_wmi_peer_assoc_mgmt_mpduq_params, wmi_peer_assoc_mgmt_mpduq_params, mgmt_mpduq_params, WMITLV_SIZE_VAR) \
++    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_peer_assoc_mgmt_mpduq_params, mgmt_mpduq_params, WMITLV_SIZE_VAR) \
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_peer_assoc_mgmt_msduq_params, mgmt_msduq_params, WMITLV_SIZE_VAR) \
+-    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_STRUC_wmi_peer_assoc_hol_mdsuq_params, wmi_peer_assoc_hol_mdsuq_params, hol_mdsuq_params, WMITLV_SIZE_VAR)
+-
++    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_peer_assoc_hol_mdsuq_params, hol_mdsuq_params, WMITLV_SIZE_VAR)
++/* NOTE:
++ * No further TLVs can be added to this message;
++ * it is already at the target's WMI_MAX_NUM_TLVS limit (13).
++ */
+ WMITLV_CREATE_PARAM_STRUC(WMI_PEER_ASSOC_CMDID);
+ 
+ /* Peer Set Rate Report Condition Cmd */
+@@ -3648,7 +3672,8 @@
+ 
+ /* Vdev up Cmd */
+ #define WMITLV_TABLE_WMI_VDEV_UP_CMDID(id,op,buf,len)   \
+-    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_STRUC_wmi_vdev_up_cmd_fixed_param, wmi_vdev_up_cmd_fixed_param, fixed_param, WMITLV_SIZE_FIX)
++    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_STRUC_wmi_vdev_up_cmd_fixed_param, wmi_vdev_up_cmd_fixed_param, fixed_param, WMITLV_SIZE_FIX) \
++    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_co_located_chan_info, co_located_chan_info, WMITLV_SIZE_VAR)
+ 
+ WMITLV_CREATE_PARAM_STRUC(WMI_VDEV_UP_CMDID);
+ 
+@@ -3681,7 +3706,7 @@
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_STRUC_wmi_vdev_vbss_config_cmd_fixed_param, wmi_vdev_vbss_config_cmd_fixed_param, fixed_param, WMITLV_SIZE_FIX)\
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_vdev_vbss_peer_pn_info, vbss_peer_pn_info, WMITLV_SIZE_VAR) \
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_vdev_vbss_peer_sn_info, vbss_peer_sn_info, WMITLV_SIZE_VAR) \
+-    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_STRUC_wmi_vdev_vbss_peer_dyn_info, wmi_vdev_vbss_peer_dyn_info, vbss_peer_dyn_info, WMITLV_SIZE_VAR)
++    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_vdev_vbss_peer_dyn_info, vbss_peer_dyn_info, WMITLV_SIZE_VAR)
+ WMITLV_CREATE_PARAM_STRUC(WMI_VDEV_VBSS_CONFIG_CMDID);
+ 
+ /* Pdev suspend Cmd */
+@@ -4897,6 +4922,11 @@
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_dbw_chan_info, dbw_chan_info, WMITLV_SIZE_VAR)
+ WMITLV_CREATE_PARAM_STRUC(WMI_PDEV_MULTIPLE_VDEV_RESTART_REQUEST_CMDID);
+ 
++/* WMI_PDEV_NPCA_AP_CAP_CMDID */
++#define WMITLV_TABLE_WMI_PDEV_NPCA_AP_CAP_CMDID(id,op,buf,len) \
++    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_STRUC_wmi_pdev_npca_ap_cap_cmd_fixed_param, wmi_pdev_npca_ap_cap_cmd_fixed_param, fixed_param, WMITLV_SIZE_FIX)
++WMITLV_CREATE_PARAM_STRUC(WMI_PDEV_NPCA_AP_CAP_CMDID);
++
+ #define WMITLV_TABLE_WMI_PDEV_UPDATE_PKT_ROUTING_CMDID(id,op,buf,len) \
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_STRUC_wmi_pdev_update_pkt_routing_cmd_fixed_param, wmi_pdev_update_pkt_routing_cmd_fixed_param, fixed_param, WMITLV_SIZE_FIX)
+ WMITLV_CREATE_PARAM_STRUC(WMI_PDEV_UPDATE_PKT_ROUTING_CMDID);
+@@ -5031,6 +5061,12 @@
+ 
+ WMITLV_CREATE_PARAM_STRUC(WMI_GET_TPC_POWER_CMDID);
+ 
++/** Get TPC IE TX power value */
++#define WMITLV_TABLE_WMI_VDEV_GET_TPC_IE_POWER_CMDID(id,op,buf,len) \
++    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_STRUC_wmi_vdev_get_tpc_ie_power_cmd_fixed_param, wmi_vdev_get_tpc_ie_power_cmd_fixed_param, fixed_param, WMITLV_SIZE_FIX)
++
++WMITLV_CREATE_PARAM_STRUC(WMI_VDEV_GET_TPC_IE_POWER_CMDID);
++
+ /* TWT enable cmd */
+ #define WMITLV_TABLE_WMI_TWT_ENABLE_CMDID(id,op,buf,len) \
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_STRUC_wmi_twt_enable_cmd_fixed_param, wmi_twt_enable_cmd_fixed_param, fixed_param, WMITLV_SIZE_FIX)
+@@ -5124,6 +5160,12 @@
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_peer_list, peer_info, WMITLV_SIZE_VAR)
+ WMITLV_CREATE_PARAM_STRUC(WMI_PEER_BULK_SET_CMDID);
+ 
++/* Multi Peer NPCA Capabilities command */
++#define WMITLV_TABLE_WMI_PEER_NPCA_CAP_CMDID(id,op,buf,len) \
++    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_STRUC_wmi_peer_npca_cap_cmd_fixed_param, wmi_peer_npca_cap_cmd_fixed_param, fixed_param, WMITLV_SIZE_FIX) \
++    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_peer_npca_cap_params, peer_npca_cap_params, WMITLV_SIZE_VAR)
++WMITLV_CREATE_PARAM_STRUC(WMI_PEER_NPCA_CAP_CMDID);
++
+ /* OBSS_PD Spatial_Reuse Set Default OBSS Thresholds */
+ #define WMITLV_TABLE_WMI_PDEV_OBSS_PD_SPATIAL_REUSE_SET_DEF_OBSS_THRESH_CMDID(id,op,buf,len) \
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_STRUC_wmi_obss_spatial_reuse_set_def_obss_thresh_cmd_fixed_param, wmi_obss_spatial_reuse_set_def_obss_thresh_cmd_fixed_param, fixed_param, WMITLV_SIZE_FIX)
+@@ -5320,7 +5362,8 @@
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_wfa_config_csa, wfa_config_csa, WMITLV_SIZE_VAR) \
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_wfa_config_ocv, wfa_config_ocv, WMITLV_SIZE_VAR) \
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_wfa_config_saquery, wfa_config_saquery, WMITLV_SIZE_VAR) \
+-    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_wfa_config_ofdma, wfa_config_ofdma, WMITLV_SIZE_VAR)
++    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_wfa_config_ofdma, wfa_config_ofdma, WMITLV_SIZE_VAR) \
++    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_wfa_config_ml, wfa_config_ml, WMITLV_SIZE_VAR)
+ WMITLV_CREATE_PARAM_STRUC(WMI_WFA_CONFIG_CMDID);
+ 
+ /* SRG OBSS color Enable Bitmap */
+@@ -5831,8 +5874,19 @@
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_STRUC_wmi_energy_mgmt_eco_mode_config_cmd_fixed_param, wmi_energy_mgmt_eco_mode_config_cmd_fixed_param, fixed_param, WMITLV_SIZE_FIX)
+ WMITLV_CREATE_PARAM_STRUC(WMI_ENERGY_MGMT_ECO_MODE_CONFIG_CMDID);
+ 
++/* peer tid rate customization cmd */
++#define WMITLV_TABLE_WMI_PEER_TID_RATE_CUSTOM_CMDID(id,op,buf,len) \
++    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_STRUC_wmi_peer_tid_rate_custom_cmd_fixed_param, wmi_peer_tid_rate_custom_cmd_fixed_param, fixed_param, WMITLV_SIZE_FIX) \
++    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_UINT32, A_UINT32, rate_code, WMITLV_SIZE_VAR)
++WMITLV_CREATE_PARAM_STRUC(WMI_PEER_TID_RATE_CUSTOM_CMDID);
+ 
++/* pdev per-vdev queue depth report request cmd */
++#define WMITLV_TABLE_WMI_PDEV_MULTI_VDEV_GET_AC_QUEUE_DEPTH_CMDID(id,op,buf,len) \
++    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_STRUC_wmi_pdev_multi_vdev_get_ac_queue_depth_cmd_fixed_param, wmi_pdev_multi_vdev_get_ac_queue_depth_cmd_fixed_param, fixed_param, WMITLV_SIZE_FIX)
++WMITLV_CREATE_PARAM_STRUC(WMI_PDEV_MULTI_VDEV_GET_AC_QUEUE_DEPTH_CMDID);
+ 
++
++
+ /************************** TLV definitions of WMI events *******************************/
+ 
+ /* Service Ready event */
+@@ -6453,7 +6507,8 @@
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_vdev_extd_stats, vdev_extd_stats, WMITLV_SIZE_VAR) \
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_pdev_extd_stats, pdev_extd_stats, WMITLV_SIZE_VAR) \
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_pdev_telemetry_stats, pdev_telemetry_stats, WMITLV_SIZE_VAR) \
+-    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_recv_bcn_stats, recv_bcn_stats, WMITLV_SIZE_VAR)
++    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_recv_bcn_stats, recv_bcn_stats, WMITLV_SIZE_VAR) \
++    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_pdev_coex_stats, coex_stats, WMITLV_SIZE_VAR)
+ WMITLV_CREATE_PARAM_STRUC(WMI_UPDATE_STATS_EVENTID);
+ 
+ /* Update PN response Event */
+@@ -7142,6 +7197,10 @@
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_UINT32, A_UINT32, tpc, WMITLV_SIZE_VAR)
+ WMITLV_CREATE_PARAM_STRUC(WMI_PDEV_TPC_EVENTID);
+ 
++#define WMITLV_TABLE_WMI_VDEV_TPC_IE_POWER_EVENTID(id,op,buf,len) \
++    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_STRUC_wmi_vdev_tpc_ie_power_event_fixed_param, wmi_vdev_tpc_ie_power_event_fixed_param, fixed_param, WMITLV_SIZE_FIX)
++WMITLV_CREATE_PARAM_STRUC(WMI_VDEV_TPC_IE_POWER_EVENTID);
++
+ #define WMITLV_TABLE_WMI_PDEV_NFCAL_POWER_ALL_CHANNELS_EVENTID(id,op,buf,len) \
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_STRUC_wmi_pdev_nfcal_power_all_channels_event_fixed_param, wmi_pdev_nfcal_power_all_channels_event_fixed_param, fixed_param, WMITLV_SIZE_FIX) \
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_pdev_nfcal_power_all_channels_nfdBr, nfdbr, WMITLV_SIZE_VAR) \
+@@ -7585,6 +7644,11 @@
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_UINT32, A_UINT32, vdev_ids_bitmap, WMITLV_SIZE_VAR)
+ WMITLV_CREATE_PARAM_STRUC(WMI_PDEV_MULTIPLE_VDEV_RESTART_RESP_EVENTID);
+ 
++/* WMI_PDEV_NPCA_AP_CAP_RESP_EVENTID */
++#define WMITLV_TABLE_WMI_PDEV_NPCA_AP_CAP_RESP_EVENTID(id,op,buf,len) \
++    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_STRUC_wmi_pdev_npca_ap_cap_resp_event_fixed_param, wmi_pdev_npca_ap_cap_resp_event_fixed_param, fixed_param, WMITLV_SIZE_FIX)
++WMITLV_CREATE_PARAM_STRUC(WMI_PDEV_NPCA_AP_CAP_RESP_EVENTID);
++
+ /* Roam scan channel list event */
+ #define WMITLV_TABLE_WMI_ROAM_SCAN_CHANNEL_LIST_EVENTID(id,op,buf,len) \
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_STRUC_wmi_roam_scan_channel_list_event_fixed_param, wmi_roam_scan_channel_list_event_fixed_param, fixed_param, WMITLV_SIZE_FIX) \
+@@ -7880,7 +7944,7 @@
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_STRUC_wmi_vdev_vbss_config_event_fixed_param, wmi_vdev_vbss_config_event_fixed_param, fixed_param, WMITLV_SIZE_FIX)\
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_vdev_vbss_peer_pn_info, vbss_peer_pn_info, WMITLV_SIZE_VAR) \
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_vdev_vbss_peer_sn_info, vbss_peer_sn_info, WMITLV_SIZE_VAR) \
+-    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_STRUC_wmi_vdev_vbss_peer_dyn_info, wmi_vdev_vbss_peer_dyn_info, vbss_peer_dyn_info, WMITLV_SIZE_VAR)
++    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_vdev_vbss_peer_dyn_info, vbss_peer_dyn_info, WMITLV_SIZE_VAR)
+ WMITLV_CREATE_PARAM_STRUC(WMI_VDEV_VBSS_CONFIG_EVENTID);
+ 
+ /* link switch event */
+@@ -7966,6 +8030,12 @@
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_UINT32, A_UINT32, scan_freq_list, WMITLV_SIZE_VAR) \
+     WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_scan_cache_info, scan_cache_info, WMITLV_SIZE_VAR)
+ WMITLV_CREATE_PARAM_STRUC(WMI_SCAN_CACHE_RESULT_EVENTID);
++
++/* pdev per-vdev queue depth report event */
++#define WMITLV_TABLE_WMI_PDEV_MULTI_VDEV_AC_QUEUE_DEPTH_EVENTID(id,op,buf,len) \
++    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_STRUC_wmi_pdev_multi_vdev_ac_queue_depth_event_fixed_param, wmi_pdev_multi_vdev_ac_queue_depth_event_fixed_param, fixed_param, WMITLV_SIZE_FIX) \
++    WMITLV_ELEM(id,op,buf,len, WMITLV_TAG_ARRAY_STRUC, wmi_vdev_ac_info, vdev_ac_info, WMITLV_SIZE_VAR)
++WMITLV_CREATE_PARAM_STRUC(WMI_PDEV_MULTI_VDEV_AC_QUEUE_DEPTH_EVENTID);
+ 
+ 
+ #ifdef __cplusplus
+diff -ruN a/fw/wmi_unified.h b/fw/wmi_unified.h
+--- a/fw/wmi_unified.h
++++ b/fw/wmi_unified.h
+@@ -596,8 +596,16 @@
+      * for Power Boost feature
+      */
+     WMI_PDEV_POWER_BOOST_MEM_ADDR_CMDID,
++    /**
++     * WMI cmd to to Enable/Disable NPCA and its capabilities
++     */
++    WMI_PDEV_NPCA_AP_CAP_CMDID,
++    /**
++     * WMI cmd to get the per-vdev, per-access-category queue pending packets
++     * for the pdev
++     */
++    WMI_PDEV_MULTI_VDEV_GET_AC_QUEUE_DEPTH_CMDID,
+ 
+-
+     /* VDEV (virtual device) specific commands */
+     /** vdev create */
+     WMI_VDEV_CREATE_CMDID = WMI_CMD_GRP_START_ID(WMI_GRP_VDEV),
+@@ -724,6 +732,7 @@
+ 
+     WMI_VDEV_VBSS_CONFIG_CMDID,
+ 
++    WMI_VDEV_GET_TPC_IE_POWER_CMDID,
+ 
+     /* peer specific commands */
+ 
+@@ -852,6 +861,12 @@
+     /* WMI command to setup reorder queue for multiple TIDs */
+     WMI_PEER_MULTIPLE_REORDER_QUEUE_SETUP_CMDID,
+ 
++    /** Customize MCS range for specific tid */
++    WMI_PEER_TID_RATE_CUSTOM_CMDID,
++
++    /** Peer NPCA CAP Command **/
++    WMI_PEER_NPCA_CAP_CMDID,
++
+     /* beacon/management specific commands */
+ 
+     /** transmit beacon by reference . used for transmitting beacon on low latency interface like pcie */
+@@ -1926,7 +1941,15 @@
+      */
+     WMI_PDEV_WIFI_RADAR_CAPABILITIES_EVENTID,
+ 
++    /*
++     * WMI_PDEV_NPCA_AP_CAP_CMDID response event
++     */
++    WMI_PDEV_NPCA_AP_CAP_RESP_EVENTID,
+ 
++    /* Event to share the per-access-category queue pending packets */
++    WMI_PDEV_MULTI_VDEV_AC_QUEUE_DEPTH_EVENTID,
++
++
+     /* VDEV specific events */
+     /** VDEV started event in response to VDEV_START request */
+     WMI_VDEV_START_RESP_EVENTID = WMI_EVT_GRP_START_ID(WMI_GRP_VDEV),
+@@ -2006,6 +2029,7 @@
+     /** Connect response */
+     WMI_VDEV_OOB_CONNECTION_RESP_EVENTID,
+     WMI_VDEV_VBSS_CONFIG_EVENTID,
++    WMI_VDEV_TPC_IE_POWER_EVENTID,
+ 
+     /* peer specific events */
+     /** FW reauet to kick out the station for reasons like inactivity,lack of response ..etc */
+@@ -8918,6 +8942,11 @@
+ } WMI_SCHED_MODE_FLAGS;
+ 
+ typedef enum {
++    WMI_PDEV_PARAM_TEMP_TX_POWER_LIMIT_RESET = 0,
++    WMI_PDEV_PARAM_TEMP_TX_POWER_LIMIT_SET,
++} wmi_pdev_param_set_temp_tx_power_limit;
++
++typedef enum {
+     /** TX chain mask */
+     WMI_PDEV_PARAM_TX_CHAIN_MASK = 0x1,
+     /** RX chain mask */
+@@ -10105,6 +10134,12 @@
+ 
+     /* configure CCE rules based on ethertype match */
+     WMI_PDEV_PARAM_CONFIG_CUSTOM_CCE_RULE,
++
++    /* temporary tx power limit */
++    WMI_PDEV_PARAM_TEMP_TX_POWER_LIMIT,
++
++    /* configure pdev coex stats period (millisecond units) */
++    WMI_PDEV_PARAM_COEX_STATS_UPDATE_PERIOD,
+ } WMI_PDEV_PARAM;
+ 
+ #define WMI_PDEV_ONLY_BSR_TRIG_IS_ENABLED(trig_type) WMI_GET_BITS(trig_type, 0, 1)
+@@ -10286,6 +10321,23 @@
+ } wmi_pdev_get_tpc_config_cmd_fixed_param;
+ 
+ typedef struct {
++    A_UINT32 tlv_header; /* TLV tag and len; tag equals WMITLV_TAG_STRUC_wmi_vdev_get_tpc_ie_power_cmd_fixed_param */
++    /** pdev_id for identifying the MAC
++     * See macros starting with WMI_PDEV_ID_ for values.
++     */
++    A_UINT32 pdev_id;
++    A_UINT32 vdev_id;
++    A_UINT32 mgmt_rate; /* Values are sent as Ratecode */
++} wmi_vdev_get_tpc_ie_power_cmd_fixed_param;
++
++typedef struct {
++    A_UINT32 tlv_header; /* TLV tag and len; tag equals WMITLV_TAG_STRUC_wmi_vdev_tpc_ie_power_event_fixed_param */
++    A_UINT32 pdev_id;
++    A_UINT32 vdev_id;
++    A_INT32 tx_pwr; /* return value will be in unit of 0.25 dBm */
++} wmi_vdev_tpc_ie_power_event_fixed_param;
++
++typedef struct {
+     A_UINT32 tlv_header; /* WMITLV_TAG_STRUC_wmi_pdev_div_get_rssi_antid_fixed_param */
+     /** pdev_id for identifying the MAC */
+     A_UINT32 pdev_id;
+@@ -10764,6 +10816,16 @@
+  */
+ } wmi_pdev_tpc_config_event_fixed_param;
+ 
++
++typedef enum {
++    WMI_ASD_PRIMARY_ANT   = 0,
++    WMI_ASD_DIVERSITY_ANT = 1,
++    WMI_ASD_THIRD_ANT     = 2,
++    WMI_ASD_FOURTH_ANT    = 3,
++
++    WMI_ASD_MAX_ANTTYPE = 4
++} WMI_ASD_ANT_TYPE;
++
+ typedef struct {
+     /** TLV tag and len; tag equals WMITLV_TAG_STRUC_wmi_pdev_div_rssi_antid_event_fixed_param */
+     A_UINT32 tlv_header;
+@@ -10777,6 +10839,17 @@
+     wmi_mac_addr macaddr;
+     /* EVM value for stream0 and stream1 20Mhz, dB units */
+     A_INT32 chain_evm[WMI_MAX_CHAINS];
++    /** num_antennas_valid:
++     * how many elements in the WMI_ASD_MAX_ANTTYPE arrays below
++     * contain valid info
++     */
++    A_UINT32 num_antennas_valid;
++    /** switch count on each antenna attached to each chain */
++    A_UINT32 ant_cnt[WMI_MAX_CHAINS][WMI_ASD_MAX_ANTTYPE];
++    /** stay duration on each antenna attached to each chain (units: ms) */
++    A_UINT32 ant_dur[WMI_MAX_CHAINS][WMI_ASD_MAX_ANTTYPE];
++    /** RSSI on each antenna attached to each chain in dbm */
++    A_INT32 ant_rssi[WMI_MAX_CHAINS][WMI_ASD_MAX_ANTTYPE];
+ } wmi_pdev_div_rssi_antid_event_fixed_param;
+ 
+ typedef struct {
+@@ -11199,26 +11272,27 @@
+ } wmi_vdev_get_twt_session_stats_info_cmd_fixed_param;
+ 
+ typedef enum {
+-    WMI_REQUEST_PEER_STAT            = 0x00001,
+-    WMI_REQUEST_AP_STAT              = 0x00002,
+-    WMI_REQUEST_PDEV_STAT            = 0x00004,
+-    WMI_REQUEST_VDEV_STAT            = 0x00008,
+-    WMI_REQUEST_BCNFLT_STAT          = 0x00010,
+-    WMI_REQUEST_VDEV_RATE_STAT       = 0x00020,
+-    WMI_REQUEST_INST_STAT            = 0x00040,
+-    WMI_REQUEST_MIB_STAT             = 0x00080,
+-    WMI_REQUEST_RSSI_PER_CHAIN_STAT  = 0x00100,
+-    WMI_REQUEST_CONGESTION_STAT      = 0x00200,
+-    WMI_REQUEST_PEER_EXTD_STAT       = 0x00400,
+-    WMI_REQUEST_BCN_STAT             = 0x00800,
+-    WMI_REQUEST_BCN_STAT_RESET       = 0x01000,
+-    WMI_REQUEST_PEER_EXTD2_STAT      = 0x02000,
+-    WMI_REQUEST_MIB_EXTD_STAT        = 0x04000,
+-    WMI_REQUEST_PMF_BCN_PROTECT_STAT = 0x08000,
+-    WMI_REQUEST_VDEV_EXTD_STAT       = 0x10000,
+-    WMI_REQUEST_PDEV_EXTD_STAT       = 0x20000,
+-    WMI_REQUEST_PDEV_TELEMETRY_STAT  = 0x40000,
+-    WMI_REQUEST_VDEV_RECV_BCN_STAT   = 0x80000,
++    WMI_REQUEST_PEER_STAT            = 0x000001,
++    WMI_REQUEST_AP_STAT              = 0x000002,
++    WMI_REQUEST_PDEV_STAT            = 0x000004,
++    WMI_REQUEST_VDEV_STAT            = 0x000008,
++    WMI_REQUEST_BCNFLT_STAT          = 0x000010,
++    WMI_REQUEST_VDEV_RATE_STAT       = 0x000020,
++    WMI_REQUEST_INST_STAT            = 0x000040,
++    WMI_REQUEST_MIB_STAT             = 0x000080,
++    WMI_REQUEST_RSSI_PER_CHAIN_STAT  = 0x000100,
++    WMI_REQUEST_CONGESTION_STAT      = 0x000200,
++    WMI_REQUEST_PEER_EXTD_STAT       = 0x000400,
++    WMI_REQUEST_BCN_STAT             = 0x000800,
++    WMI_REQUEST_BCN_STAT_RESET       = 0x001000,
++    WMI_REQUEST_PEER_EXTD2_STAT      = 0x002000,
++    WMI_REQUEST_MIB_EXTD_STAT        = 0x004000,
++    WMI_REQUEST_PMF_BCN_PROTECT_STAT = 0x008000,
++    WMI_REQUEST_VDEV_EXTD_STAT       = 0x010000,
++    WMI_REQUEST_PDEV_EXTD_STAT       = 0x020000,
++    WMI_REQUEST_PDEV_TELEMETRY_STAT  = 0x040000,
++    WMI_REQUEST_VDEV_RECV_BCN_STAT   = 0x080000,
++    WMI_REQUEST_PDEV_COEX_STAT       = 0x100000,
+ } wmi_stats_id;
+ 
+ /*
+@@ -11236,7 +11310,7 @@
+ 
+ typedef struct {
+     A_UINT32 tlv_header; /* TLV tag and len; tag equals WMITLV_TAG_STRUC_wmi_request_stats_cmd_fixed_param */
+-    wmi_stats_id stats_id;
++    A_UINT32 stats_id; /* wmi_stats_id */
+     /** unique id identifying the VDEV, generated by the caller */
+     A_UINT32 vdev_id;
+     /** peer MAC address */
+@@ -12141,7 +12215,7 @@
+ 
+ typedef struct {
+     A_UINT32 tlv_header; /* TLV tag and len; tag equals WMITLV_TAG_STRUC_wmi_stats_event_fixed_param */
+-    wmi_stats_id stats_id;
++    A_UINT32 stats_id; /* wmi_stats_id */
+     /** number of pdev stats event structures (wmi_pdev_stats) 0 or 1 */
+     A_UINT32 num_pdev_stats;
+     /** number of vdev stats event structures  (wmi_vdev_stats) 0 or max vdevs */
+@@ -12213,6 +12287,10 @@
+  * wmi_recv_bcn_stats wmi_recv_bcn_stats[]
+  * follows the other TLVs
+  */
++/* If WMI_REQUEST_PDEV_COEX_STAT is set in stats_id, then TLV
++ * wmi_pdev_coex_stats wmi_pdev_coex_stats[]
++ * follows the other TLVs
++ */
+ } wmi_stats_event_fixed_param;
+ 
+ /* WLAN channel CCA stats bitmap  */
+@@ -15641,6 +15719,16 @@
+     A_UINT32 tx_bcn_outage_cnt; /* Total number of failed beacons */
+ } wmi_bcn_stats;
+ 
++/*
++ * pdev coex stats
++ */
++typedef struct {
++    A_UINT32 tlv_header; /* TLV tag and len; tag equals WMITLV_TAG_STRUC_wmi_coex_stats */
++    A_UINT32 pdev_id;
++    A_UINT32 cur_btc_mode; /* 0 - TDD; 1 - FDD; 2 - Hybrid; 3 - DBAM */
++    A_UINT32 cur_btc_policy; /* 0 - FR; */
++} wmi_pdev_coex_stats;
++
+ #define WMI_VDEV_STATS_FLAGS_LINK_ACTIVE_FLAG_IS_VALID_BIT 0
+ #define WMI_VDEV_STATS_FLAGS_LINK_ACTIVE_FLAG_IS_VALID_MASK \
+     (1 << WMI_VDEV_STATS_FLAGS_LINK_ACTIVE_FLAG_IS_VALID_BIT)
+@@ -18369,6 +18457,12 @@
+     WMI_VDEV_UP_FLAG_VBSS_PASSIVE  = 0x00000004,
+ };
+ 
++typedef struct{
++    A_UINT32 tlv_header; /** TLV tag and len; tag equals WMITLV_TAG_STRUC_wmi_co_located_chan_info */
++    /* co-located link frequency discovered on connected ap */
++    A_UINT32 link_freq; /* MHz units */
++} wmi_co_located_chan_info;
++
+ typedef struct {
+     A_UINT32 tlv_header; /* TLV tag and len; tag equals WMITLV_TAG_STRUC_wmi_vdev_up_cmdid_fixed_param */
+     /** unique id identifying the VDEV, generated by the caller */
+@@ -18385,6 +18479,10 @@
+     A_UINT32 profile_num;
+     /** flags - this is a bitwise-or combination of WMI_VDEV_UP_FLAGS values */
+     A_UINT32 flags;
++    /* The below TLVs follow this struct:
++     *   - wmi_co_located_chan_info co_located_chan_info[];
++     *     Connected AP's co-located channel info
++     */
+ } wmi_vdev_up_cmd_fixed_param;
+ 
+ typedef struct {
+@@ -19652,6 +19750,13 @@
+      */
+     WMI_VDEV_PARAM_TWT_RESP_DISABLE,                      /* 0xC9 */
+ 
++    /*
++     * Enable or disable 2xLDPC in Fixed rate UHR data packet transmissions.
++     * valid values: 0 - Disable 2xLDPC, 1 - Enable 2xLDPC.
++     */
++    WMI_VDEV_PARAM_2xLDPC,                                /* 0xCA */
++
++
+     /*=== ADD NEW VDEV PARAM TYPES ABOVE THIS LINE ===
+      * The below vdev param types are used for prototyping, and are
+      * prone to change.
+@@ -20195,6 +20300,10 @@
+ #define WMI_VDEV_START_RESPONSE_INCORRECT_CHANNEL_PARAMS        0x9 /** home channel params are incorrect */
+ #define WMI_VDEV_START_RESPONSE_GENERIC_VDEV_START_FAILURE      0xa /** generic reason code for vdev start request reject */
+ 
++/** NPCA AP CAP response status code */
++#define WMI_PDEV_NPCA_AP_CAP_RESPONSE_STATUS_SUCCESS 0x0 /** NPCA Cap update Success */
++
++
+ /** Beacon processing related command and event structures */
+ typedef struct {
+     A_UINT32 tlv_header; /** TLV tag and len; tag equals WMITLV_TAG_STRUC_wmi_bcn_tx_hdr */
+@@ -22454,10 +22563,63 @@
+  *     wmi_peer_assoc_tid_to_link_map[] <-- tid to link_map info
+  *     wmi_peer_assoc_operating_mode_params <-- operating mode param that
+  *         host sends to AP in peer assoc req, optional TLV
++ *     wmi_peer_npca_cap_params peer_npca_cap_params[]; <-- peer NPCA
++ *         capabilities, host sends NPCA peer capabilities as an optional TLV
+  */
+ } wmi_peer_assoc_complete_cmd_fixed_param;
+ 
+ typedef struct {
++    A_UINT32 tlv_header; /* TLV tag and len; tag equals WMITLV_TAG_STRUC_wmi_peer_npca_cap_params*/
++    A_UINT32 sw_peer_id;
++    /*
++     * flags
++     * Bit0    :   NPCA Enabled/Disabled
++     *             WMI_NPCA_AP_CAP_ENABLED_GET / WMI_NPCA_AP_CAP_ENABLED_SET
++     *
++     * Bit1-3  :   NPCA Types
++     *             0:   Type1 - Two STF detectors
++     *             1:   Type2 - One STF detector
++     *             2-7: reserved for future purpose
++     *             WMI_NPCA_AP_CAP_TYPE_GET / WMI_NPCA_AP_CAP_TYPE_SET
++     *
++     * Bit4-9  :   NPCA Switch Delay
++     *             The time needed by an NPCA STA to switch from the
++     *             BSS primary channel to the NPCA primary channel,
++     *             in units of 4 us.
++     *             WMI_NPCA_AP_CAP_SWT_DELAY_GET / _SET
++     *
++     * Bit10:15:   NPCA Switch Back Delay
++     *             The time needed by an NPCA STA to switch from the
++     *             NPCA primary channel to the BSS primary channel,
++     *             in units of 4 us.
++     *             WMI_NPCA_AP_CAP_SWTB_DELAY_GET / _SET
++     *
++     * Bit16:31:   Reserved
++    */
++    A_UINT32 npca_cap;
++} wmi_peer_npca_cap_params;
++
++#define WMI_NPCA_PEER_CAP_ENABLED_GET(_var)          WMI_GET_BITS(_var, 0, 1)
++#define WMI_NPCA_PEER_CAP_ENABLED_SET(_var, _val)    WMI_SET_BITS(_var, 0, 1, _val)
++
++#define WMI_NPCA_PEER_CAP_TYPE_GET(_var)             WMI_GET_BITS(_var, 1, 3)
++#define WMI_NPCA_PEER_CAP_TYPE_SET(_var, _val)       WMI_SET_BITS(_var, 1, 3, _val)
++
++#define WMI_NPCA_PEER_CAP_SWT_DELAY_GET(_var)        WMI_GET_BITS(_var, 4, 6)
++#define WMI_NPCA_PEER_CAP_SWT_DELAY_SET(_var, _val)  WMI_SET_BITS(_var, 4, 6, _val)
++
++#define WMI_NPCA_PEER_CAP_SWTB_DELAY_GET(_var)       WMI_GET_BITS(_var, 10, 6)
++#define WMI_NPCA_PEER_CAP_SWTB_DELAY_SET(_var, _val) WMI_SET_BITS(_var, 10, 6, _val)
++
++typedef struct {
++    A_UINT32 tlv_header; /* TLV tag and len; tag equals WMITLV_TAG_STRUC_wmi_peer_npca_cap_cmd_fixed_params*/
++    /*
++     *  Following this structure is the TLV:
++     * struct wmi_peer_npca_cap_params peer_npca_cap_params[num_peers];
++     */
++} wmi_peer_npca_cap_cmd_fixed_param;
++
++typedef struct {
+     A_UINT32 tlv_header; /* TLV tag and len; tag equals WMITLV_TAG_STRUC_wmi_vdev_get_ap_oper_bw_cmd_fixed_param */
+     A_UINT32 vdev_id;
+     A_UINT32 ap_phymode; /* contains a WLAN_PHY_MODE value */
+@@ -26830,7 +26992,15 @@
+      */
+     WMI_VENDOR_OUI_ACTION_DISABLE_DYNAMIC_SMPS = 18,
+ 
++    /*
++     * Keep sending qos null frame on P2P interface when final bmiss is
++     * detected, if specific vendor OUI matches.
++     * If an ACK is received, suppress reporting the final beacon miss
++     * to the host to avoid triggering a disconnect.
++     */
++    WMI_VENDOR_OUI_ACTION_FORCE_TX_NULL_FRAME_ON_P2P = 19,
+ 
++
+     /* Add any action before this line */
+     WMI_VENDOR_OUI_ACTION_MAX_ACTION_ID
+ } wmi_vendor_oui_action_id;
+@@ -33843,7 +34013,24 @@
+     A_UINT32 tid_mask; /* bits 0 to 15 = QoS TIDs, bit 16 = non-qos TID */
+ } wmi_peer_reorder_queue_remove_cmd_fixed_param;
+ 
++/**
++ * This command is sent from WLAN host driver to firmware for
++ * customizing MCS range & retry count for specific TID of specific peer
++ */
++typedef struct {
++    A_UINT32 tlv_header;
++    A_UINT32 vdev_id;
++    wmi_mac_addr peer_macaddr; /* Peer MAC address */
++    A_UINT32 tid;
++    /* on_off:
++     * Rate customization enable/disable. 1 for enable and 0 for disable.
++     */
++    A_UINT32 on_off;
++    A_UINT32 bw; /* Unit MHz */
++    A_UINT32 retry_count;
++} wmi_peer_tid_rate_custom_cmd_fixed_param;
+ 
++
+ /* DEPRECATED - use wmi_pdev_set_mac_config_response_event_fixed_param instead */
+ typedef struct {
+     A_UINT32 tlv_header; /* TLV tag and len; tag equals WMITLV_TAG_STRUC_wmi_soc_set_dual_mac_config_response_event_fixed_param */
+@@ -37582,6 +37769,9 @@
+ #define WMI_SUPPORT_11BE_GET(flags) WMI_GET_BITS(flags, 6, 1)
+ #define WMI_SUPPORT_11BE_SET(flags, value) WMI_SET_BITS(flags, 6, 1, value)
+ 
++#define WMI_SUPPORT_11BN_GET(flags) WMI_GET_BITS(flags, 7, 1)
++#define WMI_SUPPORT_11BN_SET(flags, value) WMI_SET_BITS(flags, 7, 1, value)
++
+ #define WMI_MAX_MUBFEE_GET(flags) WMI_GET_BITS(flags, 28, 4)
+ #define WMI_MAX_MUBFEE_SET(flags, value) WMI_SET_BITS(flags, 28, 4, value)
+ 
+@@ -39467,6 +39657,8 @@
+         WMI_RETURN_STRING(WMI_ENERGY_MGMT_EDPS_CONFIG_CMDID);
+         WMI_RETURN_STRING(WMI_ENERGY_MGMT_PUO_CONFIG_CMDID);
+         WMI_RETURN_STRING(WMI_ENERGY_MGMT_ECO_MODE_CONFIG_CMDID);
++        WMI_RETURN_STRING(WMI_PEER_TID_RATE_CUSTOM_CMDID);
++        WMI_RETURN_STRING(WMI_VDEV_GET_TPC_IE_POWER_CMDID);
+     }
+ 
+     return (A_UINT8 *) "Invalid WMI cmd";
+@@ -42524,6 +42716,7 @@
+     WMI_ROAM_INVOKE_STATUS_INVALID_SCAN_MODE,      /* Roam scan mode is invalid */
+     WMI_ROAM_INVOKE_STATUS_NO_CAND_AP,             /* No candidate AP found to roam to */
+     WMI_ROAM_INVOKE_STATUS_HO_FAIL,                /* handoff failed */
++    WMI_ROAM_INVOKE_STATUS_SUSTAIN_CONN,           /* Sustain existing connection when MLD self roaming fails */
+ } wmi_roam_invoke_status_error_t;
+ 
+ typedef struct {
+@@ -45809,7 +46002,7 @@
+ 
+ /* Bit 4~5 Group Addressed BU indication Exponent */
+ #define WMI_EHT_OPS_GROUP_ADDRESSED_BU_INDICATION_EXPONENT_GET(eht_ops) WMI_GET_BITS(eht_ops, 4, 2)
+-#define WMI_EHT_OPS_GROUP_ADDRESSED_BU_INDICATION_EXPONENT_SET(eht_ops) WMI_SET_BITS(eht_ops, 4, 2, value)
++#define WMI_EHT_OPS_GROUP_ADDRESSED_BU_INDICATION_EXPONENT_SET(eht_ops, value) WMI_SET_BITS(eht_ops, 4, 2, value)
+ 
+ /* Bit 6 is for MCS15. If bit6 is 1 then we disable mcs15 */
+ #define WMI_EHT_OPS_MCS15_DISABLE_GET(eht_ops) WMI_GET_BITS(eht_ops, 6, 1)
+@@ -47097,6 +47290,15 @@
+      */
+ } wmi_pdev_multiple_vdev_restart_resp_event_fixed_param;
+ 
++typedef struct {
++    /** TLV tag and len; tag equals
++    * WMITLV_TAG_STRUC_wmi_pdev_npca_ap_cap_resp_event_fixed_param */
++    A_UINT32 tlv_header;
++    A_UINT32 pdev_id; /* ID of the pdev this response belongs to */
++    /** Return status. As per WMI_PDEV_NPCA_AP_CAP_RESPONSE_XXXXX */
++    A_UINT32 status;
++} wmi_pdev_npca_ap_cap_resp_event_fixed_param;
++
+ /** WMI event for Firmware to report soundbar audio frame statistics to Host **/
+ typedef struct {
+     /** TLV tag and len **/
+@@ -47493,6 +47695,17 @@
+ } wmi_wfa_config_ofdma;
+ 
+ typedef struct {
++    /* TLV tag and len; tag equals WMITLV_TAG_STRUC_wmi_wfa_config_ml */
++    A_UINT32 tlv_header;
++    /* force_add_ext_mld_cap_field
++     *   Possible values from host are:
++     *   0  default behavior
++     *   1  add ext mld cap field always when connection
++     */
++    A_UINT32 force_add_ext_mld_cap_field;
++} wmi_wfa_config_ml;
++
++typedef struct {
+     /* TLV tag and len; tag equals WMITLV_TAG_STRUC_wmi_wfa_config_cmd_fixed_param */
+     A_UINT32 tlv_header;
+     /** VDEV identifier */
+@@ -47503,6 +47716,7 @@
+      * wmi_wfa_config_ocv     wfa_config_ocv[];     (0 or 1 elements)
+      * wmi_wfa_config_saquery wfa_config_saquery[]; (0 or 1 elements)
+      * wmi_wfa_config_ofdma   wfa_config_ofdma[];   (0 or 1 elements)
++     * wmi_wfa_config_ml      wmi_wfa_config_ml[];  (0 or 1 elements)
+      */
+ } wmi_wfa_config_cmd_fixed_param;
+ 
+@@ -50195,6 +50409,7 @@
+     WMI_VDEV_PAUSE_TYPE_MLO_LINK = 1,
+     WMI_VDEV_PAUSE_TYPE_TX = 2,
+     WMI_VDEV_PAUSE_TYPE_TX_DATA = 3,
++    WMI_VDEV_PAUSE_TYPE_TX_RX = 4,
+ } WMI_VDEV_PAUSE_TYPE;
+ 
+ typedef struct {
+@@ -51037,7 +51252,76 @@
+     A_UINT32 size;
+ } wmi_pdev_power_boost_mem_addr_cmd_fixed_param;
+ 
++typedef struct _wmi_npca_info{
++    /* WMI Non-PrimaryChannelAccess channel
++     * Specifically, this is the "other primary" channel used if the
++     * "main primary" is occupied by low-bandwidth OBSS traffic.
++     */
++    wmi_channel npca_chan;
++    /* NPCA punctured bitmap */
++    A_UINT32 puncture_20mhz_bitmap;
++    /*
++     * flags
++     * Bit0     :  NPCA Enabled/Disabled
++     *             WMI_NPCA_AP_CAP_ENABLED_GET / WMI_NPCA_AP_CAP_ENABLED_SET
++     *
++     * Bit1-3   :  NPCA Types
++     *             0:   Type1 - Two STF detectors
++     *             1:   Type2 - One STF detector
++     *             2-7: Reserved for future purpose
++     *             WMI_NPCA_AP_CAP_TYPE_GET / WMI_NPCA_AP_CAP_TYPE_SET
++     *
++     * Bit4-9   :  NPCA Minium Threshold
++     *             The NPCA minimum duration threshold T, in units of 128
++     *             us, is T = 512 + NMDT x 128, where NMDT is the field
++     *             value, which yields a minimum of 512 us and a maximum of
++     *             2432 us. The minimum is chosen to cover at least the
++     *             transmission time of NPCA ICF and ICR exchange plus a
++     *             typical Data and Ack/BA exchange using non-HT or non-
++     *             HT duplicate PPDU format with 6 Mb/s data rate
++     *             WMI_NPCA_AP_CAP_MIN_THRES_GET / _SET
++     *
++     * Bit10-15 :  NPCA Switch Delay
++     *             The time needed by an NPCA STA to switch from the
++     *             BSS primary channel to the NPCA primary channel,
++     *             in units of 4 us.
++     *             WMI_NPCA_AP_CAP_SWT_DELAY_GET / _SET
++     *
++     * Bit16:21 :  NPCA Switch Back Delay
++     *             The time needed by an NPCA STA to switch from the
++     *             NPCA primary channel to the BSS primary channel,
++     *             in units of 4 us.
++     *             WMI_NPCA_AP_CAP_SWTB_DELAY_GET / _SET
++     *
++     * Bit22:31 :  Reserved
++     */
++    A_UINT32 npca_cap;
++    A_UINT32 reserved; /* reserved for future purpose */
++} wmi_npca_ap_info;
++
+ typedef struct {
++    /* WMITLV_TAG_STRUC_wmi_pdev_npca_ap_cap_cmd_fixed_param */
++    A_UINT32 tlv_header;
++    A_UINT32 pdev_id;
++    wmi_npca_ap_info npca_ap_info;
++} wmi_pdev_npca_ap_cap_cmd_fixed_param;
++
++#define WMI_NPCA_AP_CAP_ENABLED_GET(_var)          WMI_GET_BITS(_var, 0, 1)
++#define WMI_NPCA_AP_CAP_ENABLED_SET(_var, _val)    WMI_SET_BITS(_var, 0, 1, _val)
++
++#define WMI_NPCA_AP_CAP_TYPE_GET(_var)             WMI_GET_BITS(_var, 1, 3)
++#define WMI_NPCA_AP_CAP_TYPE_SET(_var, _val)       WMI_SET_BITS(_var, 1, 3, _val)
++
++#define WMI_NPCA_AP_CAP_MIN_THRES_GET(_var)        WMI_GET_BITS(_var, 4, 4)
++#define WMI_NPCA_AP_CAP_MIN_THRES_SET(_var, _val)  WMI_SET_BITS(_var, 4, 4, _val)
++
++#define WMI_NPCA_AP_CAP_SWT_DELAY_GET(_var)        WMI_GET_BITS(_var, 8, 6)
++#define WMI_NPCA_AP_CAP_SWT_DELAY_SET(_var, _val)  WMI_SET_BITS(_var, 8, 6, _val)
++
++#define WMI_NPCA_AP_CAP_SWTB_DELAY_GET(_var)       WMI_GET_BITS(_var, 14, 6)
++#define WMI_NPCA_AP_CAP_SWTB_DELAY_SET(_var, _val) WMI_SET_BITS(_var, 14, 6, _val)
++
++typedef struct {
+     /* WMITLV_TAG_STRUC_wmi_get_scan_cache_result_cmd_fixed_param */
+     A_UINT32 tlv_header;
+ } wmi_get_scan_cache_result_cmd_fixed_param;
+@@ -51223,17 +51507,41 @@
+     union {
+         A_UINT32 peer_dyn_info2_word32;
+         struct {
+-            /**  1:0 pm
+-             *  31:2 reserved
++            /**  0:0 pm
++             *   1:1  emlsr
++             *  17:2  padding_delay
++             *  26:18 transition_delay
++             *  30:27 transition_timeout
++             *  31    Reserved
+              */
+             A_UINT32
+-                pm   : 1,
+-                rsvd : 31;
++                pm                   :  1,
++                emlsr                :  1,
++                padding_delay_us     : 16,
++                transition_delay_us  :  9,
++                transition_timeout_us:  4,
++                rsvd1                :  1;
+         };
+     };
++    union {
++        A_UINT32 peer_dyn_info3_word32;
++        struct {
++            /** 13:0 link_bitmap
++             *  31:15 Reserved
++             */
++            A_UINT32
++                link_bitmap: 14,
++                rsvd2      : 18;
++        };
++    };
+ } wmi_vdev_vbss_peer_dyn_info;
+ 
+ typedef enum {
++    WMI_VBSS_UNICAST_PN_INFO         = 1,
++    WMI_VBSS_MULTICAST_PN_INFO       = 2,
++} wmi_vbss_pn_ctxt_id;
++
++typedef enum {
+     WMI_VBSS_GET_PEER_CONTEXT        = 1,
+     WMI_VBSS_SET_PEER_CONTEXT        = 2,
+     WMI_VBSS_RX_SUSPEND_PEER_CONTEXT = 3,
+@@ -51260,7 +51568,22 @@
+ #define WMI_VDEV_VBSS_DYN_INFO_GET_PM(peer_dyn_info2) WMI_GET_BITS(pm, 0, 1)
+ #define WMI_VDEV_VBSS_DYN_INFO_SET_PM(peer_dyn_info2, value) WMI_SET_BITS(pm, 0, 1, value)
+ 
++#define WMI_VDEV_VBSS_DYN_INFO_GET_EMLSR(peer_dyn_info2) WMI_GET_BITS(emlsr, 1, 1)
++#define WMI_VDEV_VBSS_DYN_INFO_SET_EMLSR(peer_dyn_info2, value) WMI_SET_BITS(emlsr, 1, 1, value)
+ 
++#define WMI_VDEV_VBSS_DYN_INFO_GET_PADDING_DELAY(peer_dyn_info2) WMI_GET_BITS(padding_delay, 2, 16)
++#define WMI_VDEV_VBSS_DYN_INFO_SET_PADDING_DELAY(peer_dyn_info2, value) WMI_SET_BITS(padding_delay, 2, 16, value)
++
++#define WMI_VDEV_VBSS_DYN_INFO_GET_TRANSITION_DELAY(peer_dyn_info2) WMI_GET_BITS(transition_delay, 18, 9)
++#define WMI_VDEV_VBSS_DYN_INFO_SET_TRANSITION_DELAY(peer_dyn_info2, value) WMI_SET_BITS(transition_delay, 18, 9, value)
++
++#define WMI_VDEV_VBSS_DYN_INFO_GET_TRANSITION_TIMEOUT(peer_dyn_info2) WMI_GET_BITS(transition_timeout, 27, 4)
++#define WMI_VDEV_VBSS_DYN_INFO_SET_TRANSITION_TIMEOUT(peer_dyn_info2, value) WMI_SET_BITS(transition_timeout, 27, 4, value)
++
++#define WMI_VDEV_VBSS_DYN_INFO_GET_LINK_BITMAP(peer_dyn_info3) WMI_GET_BITS(link_bitmap, 0, 14)
++#define WMI_VDEV_VBSS_DYN_INFO_SET_LINK_BITMAP(peer_dyn_info3, value) WMI_SET_BITS(link_bitmap, 0, 14, value)
++
++
+ typedef struct {
+     A_UINT32 tlv_header; /** TLV tag and len; tag equals WMITLV_TAG_STRUC_wmi_vdev_vbss_config_event_fixed_param */
+     /** unique id identifying the VDEV, generated by the caller */
+@@ -51304,12 +51627,18 @@
+     A_UINT32 enable;
+ } wmi_energy_mgmt_pcie_lpm_cmd_fixed_param;
+ 
++typedef enum {
++    WMI_DCVS_ENABLE,                  /* Enable clock and voltage scaling */
++    WMI_DCVS_DISABLE,                 /* Disable clock and voltage scaling */
++    WMI_DCVS_CLOCK_SCALING_ONLY,      /* Enable only clock scaling */
++} wmi_dcvs_config_e;
++
+ typedef struct {
+     /** TLV tag and len; tag equals
+     * WMITLV_TAG_STRUC_wmi_energy_mgmt_dcvs_config_cmd_fixed_param */
+     A_UINT32 tlv_header;
+-    /** enable or disable DCVS config */
+-    A_UINT32 enable;
++    /** DCVS config - holds a wmi_dcvs_config_e value */
++    A_UINT32 config;
+ } wmi_energy_mgmt_dcvs_config_cmd_fixed_param;
+ 
+ typedef struct {
+@@ -51359,6 +51688,30 @@
+     /** PDEV identifier */
+     A_UINT32 pdev_id;
+ } wmi_energy_mgmt_eco_mode_config_cmd_fixed_param;
++
++typedef struct {
++    A_UINT32 tlv_header; /** TLV tag and len; tag equals WMITLV_TAG_STRUC_wmi_pdev_multi_vdev_get_ac_queue_depth_cmd_fixed_param */
++    A_UINT32 pdev_id; /** pdev ID set by the command */
++} wmi_pdev_multi_vdev_get_ac_queue_depth_cmd_fixed_param;
++
++typedef struct {
++    A_UINT32 tlv_header;  /* TLV tag and len; tag equals WMITLV_TAG_STRUC_wmi_vdev_ac_info */
++    A_UINT32 vdev_id;
++    /** pending_packets_per_ac:
++     *  number of MSDUs pending in MSDU and MPDU queues for the Access Category
++     *  for the specific vdev
++     */
++    A_UINT32 pending_packets_per_ac[WLAN_MAX_AC];
++} wmi_vdev_ac_info;
++
++typedef struct {
++    A_UINT32 tlv_header;     /* TLV tag and len; tag equals WMITLV_TAG_STRUC_wmi_pdev_multi_vdev_ac_queue_depth_event_fixed_param */
++    A_UINT32 pdev_id;        /* pdev ID set by the command */
++    /* The TLVs for the 4 AC follows with the vdev_id :
++     *     wmi_vdev_ac_info vdev_ac_info[];   wmi_vdev_ac_info for BE/BK/VI/VO
++     */
++} wmi_pdev_multi_vdev_ac_queue_depth_event_fixed_param;
++
+ 
+ 
+ 
+diff -ruN a/fw/wmi_version.h b/fw/wmi_version.h
+--- a/fw/wmi_version.h
++++ b/fw/wmi_version.h
+@@ -37,7 +37,7 @@
+ #define __WMI_VER_MINOR_    0
+ /** WMI revision number has to be incremented when there is a
+  *  change that may or may not break compatibility. */
+-#define __WMI_REVISION_ 1632
++#define __WMI_REVISION_ 1648
+ 
+ /** The Version Namespace should not be normally changed. Only
+  *  host and firmware of the same WMI namespace will work

@@ -3,8 +3,10 @@
 # Глобальний monitor mode вбудованого Wi-Fi (Qualcomm qcacld-3.0, параметр con_mode=4).
 # Без явно виставленого каналу інтерфейс у моніторі не приймає жодного кадру (NO-CARRIER) —
 # тому monitor завжди ставить канал (типово 6).
-# Лише приймання: injection у цьому режимі драйвер не підтримує. Паралельний монітор поряд
-# із підключенням теж ні — тому на час монітора Wi-Fi в Android вимикається.
+# Інжекція: стоковий драйвер у моніторі лише приймає; зі збіркою драйвера з модуля
+# nethunter-wlan-inject (перевірка: nh-wlan-driver status) у цьому ж режимі працює й інжекція.
+# Паралельний монітор поряд із підключенням не підтримується — тому на час монітора
+# Wi-Fi в Android вимикається.
 STATE=/data/adb/nethunter-kmods-wlan
 IFACE=wlan0
 mkdir -p "$STATE"
@@ -25,6 +27,10 @@ iw() {
   elif [ -x "$KALI/usr/sbin/iw" ]; then chroot "$KALI" /usr/sbin/iw "$@"
   else echo "iw not found (install NetHunter Kali chroot)" >&2; return 127; fi
 }
+
+# збірка драйвера з інжекцією впізнається за параметром, якого у стоковому немає
+injection_capable() { ls /sys/module/qca_cld3_*/parameters/injection_dp_inflight_limit >/dev/null 2>&1; }
+injection_note() { injection_capable && echo "receive + injection" || echo "receive only: stock driver"; }
 
 # ARPHRD: 1 = ethernet (managed), 803 = radiotap (monitor)
 iface_type() { cat /sys/class/net/$IFACE/type 2>/dev/null; }
@@ -61,7 +67,7 @@ case "$1" in
       echo 4 > "$P" || { echo "failed to write con_mode"; exit 1; }
       wait_for "monitor interface" '[ "$(iface_type)" = "803" ]' 10 || { echo 0 > "$P"; exit 1; }
       ip link set $IFACE up || exit 1
-      echo "monitor mode: $IFACE (receive only, no injection)"
+      echo "monitor mode: $IFACE ($(injection_note))"
     fi
     set_channel "${2:-6}"
     ;;
@@ -88,6 +94,7 @@ case "$1" in
     echo "con_mode: $(cat "$P") ($P)"
     case "$(iface_type)" in 803) echo "$IFACE: monitor";; 1) echo "$IFACE: managed";; "") echo "$IFACE: absent";; *) echo "$IFACE: type $(iface_type)";; esac
     iw dev $IFACE info 2>/dev/null | grep -E "channel" | sed 's/^[[:space:]]*//'
+    injection_capable && echo "injection: supported (nethunter-wlan-inject driver)" || echo "injection: not supported (stock driver)"
     wifi_enabled && echo "Android Wi-Fi: on" || echo "Android Wi-Fi: off"
     ;;
   *) echo "usage: nh-wlan monitor [channel, default 6] | managed | channel <N> | status"; exit 1 ;;

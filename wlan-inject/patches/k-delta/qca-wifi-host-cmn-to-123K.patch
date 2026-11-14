@@ -1,0 +1,813 @@
+diff --git a/dp/wifi3.0/be/dp_be_tx.c b/dp/wifi3.0/be/dp_be_tx.c
+index 43811ca..7937cbd 100644
+--- a/dp/wifi3.0/be/dp_be_tx.c
++++ b/dp/wifi3.0/be/dp_be_tx.c
+@@ -2589,6 +2589,15 @@ more_data:
+ 				qdf_assert_always(0);
+ 			}
+ 
++			if (qdf_unlikely(tx_desc->flags &
++			    DP_TX_DESC_FLAG_REAPED)) {
++				dp_tx_comp_alert("Txdesc duplicate entry, flags = %x,id = %d",
++						 tx_desc->flags, tx_desc->id);
++				qdf_assert_always(0);
++			}
++
++			tx_desc->flags |= DP_TX_DESC_FLAG_REAPED;
++
+ 			/* Collect hw completion contents */
+ 			hal_tx_comp_desc_sync_wrapper(tx_comp_hal_desc,
+ 						      tx_desc_pool,
+diff --git a/dp/wifi3.0/dp_tx.c b/dp/wifi3.0/dp_tx.c
+index ec4a536..de9d9e6 100644
+--- a/dp/wifi3.0/dp_tx.c
++++ b/dp/wifi3.0/dp_tx.c
+@@ -7526,6 +7526,15 @@ more_data:
+ 				qdf_assert_always(0);
+ 			}
+ 
++			if (qdf_unlikely(tx_desc->flags &
++			    DP_TX_DESC_FLAG_REAPED)) {
++				dp_tx_comp_alert("Txdesc duplicate entry, flags = %x,id = %d",
++						 tx_desc->flags, tx_desc->id);
++				qdf_assert_always(0);
++			}
++
++			tx_desc->flags |= DP_TX_DESC_FLAG_REAPED;
++
+ 			/* Collect hw completion contents */
+ 			hal_tx_comp_desc_sync_wrapper(tx_comp_hal_desc,
+ 						      tx_desc_pool, tx_desc,
+diff --git a/dp/wifi3.0/dp_tx.h b/dp/wifi3.0/dp_tx.h
+index 2803339..59b63b7 100644
+--- a/dp/wifi3.0/dp_tx.h
++++ b/dp/wifi3.0/dp_tx.h
+@@ -92,6 +92,7 @@ void dp_tx_update_eapol_comp_status_stats(struct dp_soc *soc,
+ #define DP_TX_DESC_FLAG_SPECIAL         0x80000
+ #define DP_TX_DESC_FLAG_BCAST           0x100000
+ #define DP_TX_DESC_FLAG_OPT_DP_CTRL           0x200000
++#define DP_TX_DESC_FLAG_REAPED		0x400000
+ 
+ #define DP_TX_EXT_DESC_FLAG_METADATA_VALID 0x1
+ 
+diff --git a/dp/wifi3.0/rh/dp_rh_tx.c b/dp/wifi3.0/rh/dp_rh_tx.c
+index fac34f1..7affe33 100644
+--- a/dp/wifi3.0/rh/dp_rh_tx.c
++++ b/dp/wifi3.0/rh/dp_rh_tx.c
+@@ -751,6 +751,15 @@ void dp_tx_compl_handler_rh(struct dp_soc *soc, qdf_nbuf_t htt_msg)
+ 			qdf_assert_always(0);
+ 		}
+ 
++		if (qdf_unlikely(tx_desc->flags &
++			DP_TX_DESC_FLAG_REAPED)) {
++			dp_tx_comp_alert("Txdesc duplicate entry, flags = %x,id = %d",
++					 tx_desc->flags, tx_desc->id);
++			qdf_assert_always(0);
++		}
++
++		tx_desc->flags |= DP_TX_DESC_FLAG_REAPED;
++
+ 		if (HTT_TX_BUFFER_ADDR_INFO_RELEASE_SOURCE_GET(*(msg_word + 1)) ==
+ 		    HTT_TX_MSDU_RELEASE_SOURCE_FW)
+ 			tx_desc->buffer_src = HAL_TX_COMP_RELEASE_SOURCE_FW;
+diff --git a/hal/wifi3.0/wcn7750/hal_wcn7750.c b/hal/wifi3.0/wcn7750/hal_wcn7750.c
+index 9b7507f..2c53266 100644
+--- a/hal/wifi3.0/wcn7750/hal_wcn7750.c
++++ b/hal/wifi3.0/wcn7750/hal_wcn7750.c
+@@ -1,5 +1,5 @@
+ /* Copyright (c) 2020-2021 The Linux Foundation. All rights reserved.
+- * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+  * SPDX-License-Identifier: ISC
+  */
+ 
+@@ -2389,6 +2389,26 @@ void hal_srng_dst_hw_init_7750(struct hal_soc *hal_soc,
+ 	hal_srng_dst_hw_init_generic(hal_soc, srng, idle_check, idx);
+ }
+ 
++static void
++hal_rx_flow_cmem_update_reo_dst_ind_wcn7750(struct hal_soc *hal_soc,
++					    uint32_t cmem_ba,
++					    uint32_t flow_idx,
++					    uint8_t reo_dest_ind)
++{
++	uint32_t fse_offset;
++	uint32_t value;
++
++	fse_offset = cmem_ba + (flow_idx * HAL_RX_FST_ENTRY_SIZE);
++	value = HAL_CMEM_READ(hal_soc,
++			      fse_offset + HAL_OFFSET(RX_FLOW_SEARCH_ENTRY,
++						      L4_PROTOCOL));
++	value &= ~RX_FLOW_SEARCH_ENTRY_REO_DESTINATION_INDICATION_MASK;
++	value |= HAL_SET_FLD_SM(RX_FLOW_SEARCH_ENTRY,
++				REO_DESTINATION_INDICATION, reo_dest_ind);
++	HAL_CMEM_WRITE(hal_soc, fse_offset + HAL_OFFSET(RX_FLOW_SEARCH_ENTRY,
++							L4_PROTOCOL), value);
++}
++
+ static void hal_hw_txrx_ops_attach_7750(struct hal_soc *hal_soc)
+ {
+ 	/* init and setup */
+@@ -2672,6 +2692,8 @@ static void hal_hw_txrx_ops_attach_7750(struct hal_soc *hal_soc)
+ 	hal_soc->ops->hal_txmon_status_get_num_users =
+ 				hal_txmon_status_get_num_users_generic_be;
+ #endif /* WLAN_PKT_CAPTURE_TX_2_0 */
++	hal_soc->ops->hal_rx_flow_cmem_update_reo_dst_ind =
++				hal_rx_flow_cmem_update_reo_dst_ind_wcn7750;
+ };
+ 
+ struct hal_hw_srng_config hw_srng_table_7750[] = {
+diff --git a/qdf/inc/qdf_timer.h b/qdf/inc/qdf_timer.h
+index 2fbdf23..a30dfc9 100644
+--- a/qdf/inc/qdf_timer.h
++++ b/qdf/inc/qdf_timer.h
+@@ -1,5 +1,6 @@
+ /*
+  * Copyright (c) 2014-2016, 2018-2021 The Linux Foundation. All rights reserved.
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+  *
+  * Permission to use, copy, modify, and/or distribute this software for
+  * any purpose with or without fee is hereby granted, provided that the
+@@ -137,4 +138,30 @@ static inline void qdf_timer_free(qdf_timer_t *timer)
+ 	__qdf_timer_free(timer);
+ }
+ 
++/**
++ * qdf_timer_delete() - Deactivate a timer
++ * @timer: timer to be deactivated
++ *
++ * The function only deactivates a pending timer.
++ *
++ * Return: 0 if timer is not pending, 1 if timer is not pending and deactivated
++ */
++static inline int qdf_timer_delete(struct timer_list *timer)
++{
++	return	__qdf_timer_delete(timer);
++}
++
++/**
++ * qdf_timer_delete_sync() - Deactivate a timer and wait for handler to finish
++ * @timer: timer to be deactivated
++ *
++ * The function deactivates timer and waits for any running handler to complete.
++ *
++ * Return: 0 if timer is not pending, 1 if timer is not pending and deactivated
++ */
++static inline int qdf_timer_delete_sync(struct timer_list *timer)
++{
++	return	__qdf_timer_delete_sync(timer);
++}
++
+ #endif /* _QDF_TIMER_H */
+diff --git a/qdf/linux/src/i_qdf_hrtimer.h b/qdf/linux/src/i_qdf_hrtimer.h
+index 1367259..4cb725a 100644
+--- a/qdf/linux/src/i_qdf_hrtimer.h
++++ b/qdf/linux/src/i_qdf_hrtimer.h
+@@ -1,6 +1,6 @@
+ /*
+  * Copyright (c) 2014-2019,2021 The Linux Foundation. All rights reserved.
+- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+  *
+  * Permission to use, copy, modify, and/or distribute this software for
+  * any purpose with or without fee is hereby granted, provided that the
+@@ -134,6 +134,34 @@ static enum hrtimer_restart __qdf_hrtimer_cb(struct hrtimer *arg)
+ 	return (enum hrtimer_restart)timer->callback(timer->cb_ctx);
+ }
+ 
++/**
++ * __qdf_init_hrtimer() - Initialize a high-resolution timer
++ * @hrtimer: pointer to the hrtimer object
++ * @clock: clock id
++ * @hrt_mode: mode of hrtimer
++ *
++ * Initialize a high-resolution timer with the appropriate setup function
++ * based on the kernel version
++ *
++ * Return: None
++ */
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0))
++static inline void
++__qdf_init_hrtimer(struct hrtimer *hrtimer, enum qdf_clock_id clock,
++		   enum hrtimer_mode hrt_mode)
++{
++	hrtimer_setup(hrtimer, __qdf_hrtimer_cb, clock, hrt_mode);
++}
++#else
++static inline void
++__qdf_init_hrtimer(struct hrtimer *hrtimer, enum qdf_clock_id clock,
++		   enum hrtimer_mode hrt_mode)
++{
++	hrtimer_init(hrtimer, clock, hrt_mode);
++	hrtimer->function = __qdf_hrtimer_cb;
++}
++#endif /* KERNEL_VERSION(6, 15, 0)*/
++
+ /**
+  * __qdf_hrtimer_init() - init hrtimer in a given context
+  * @timer: pointer to the hrtimer object
+@@ -164,8 +192,7 @@ static inline void  __qdf_hrtimer_init(__qdf_hrtimer_data_t *timer,
+ 		mode |= HRTIMER_MODE_SOFT;
+ 
+ 	hrt_mode = __qdf_hrtimer_get_mode(mode);
+-	hrtimer_init(hrtimer, clock, hrt_mode);
+-	hrtimer->function = __qdf_hrtimer_cb;
++	__qdf_init_hrtimer(hrtimer, clock, hrt_mode);
+ }
+ #else
+ static inline void  __qdf_hrtimer_init(__qdf_hrtimer_data_t *timer,
+@@ -182,12 +209,10 @@ static inline void  __qdf_hrtimer_init(__qdf_hrtimer_data_t *timer,
+ 	timer->callback = cback;
+ 	timer->cb_ctx = timer;
+ 
+-	if (timer->ctx == QDF_CONTEXT_HARDWARE) {
+-		hrtimer_init(hrtimer, clock, hrt_mode);
+-		hrtimer->function = __qdf_hrtimer_cb;
+-	} else if (timer->ctx == QDF_CONTEXT_TASKLET) {
++	if (timer->ctx == QDF_CONTEXT_HARDWARE)
++		__qdf_init_hrtimer(hrtimer, clock, hrt_mode);
++	else if (timer->ctx == QDF_CONTEXT_TASKLET)
+ 		tasklet_hrtimer_init(tasklet_hrtimer, cback, clock, hrt_mode);
+-	}
+ }
+ #endif
+ 
+diff --git a/qdf/linux/src/i_qdf_nbuf.h b/qdf/linux/src/i_qdf_nbuf.h
+index bf20cd1..50066f9 100644
+--- a/qdf/linux/src/i_qdf_nbuf.h
++++ b/qdf/linux/src/i_qdf_nbuf.h
+@@ -2028,6 +2028,7 @@ static inline void __qdf_flow_get_ipv6_dst_addr(struct flow_keys *flow,
+ 	memcpy(buf, &flow->addrs.v6addrs.dst, sizeof(flow->addrs.v6addrs.dst));
+ }
+ 
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0))
+ /**
+  * __qdf_nbuf_flow_get_ports() - extract the upper layer ports
+  * @skb: Pointer to network buffer
+@@ -2039,8 +2040,16 @@ static inline void __qdf_nbuf_flow_get_ports(const struct sk_buff *skb,
+ 					     struct flow_keys *flow)
+ {
+ 	flow->ports.ports = skb_flow_get_ports(skb, flow->control.thoff,
+-				  flow->basic.ip_proto);
++					       flow->basic.ip_proto, NULL, 0);
+ }
++#else
++static inline void __qdf_nbuf_flow_get_ports(const struct sk_buff *skb,
++					     struct flow_keys *flow)
++{
++	flow->ports.ports = skb_flow_get_ports(skb, flow->control.thoff,
++					       flow->basic.ip_proto);
++}
++#endif /* KERNEL_VERSION(6, 15, 0)*/
+ 
+ /**
+  * __qdf_flow_parse_src_port() - parse src port from flow keys
+diff --git a/qdf/linux/src/i_qdf_timer.h b/qdf/linux/src/i_qdf_timer.h
+index 1bbf212..5092e13 100644
+--- a/qdf/linux/src/i_qdf_timer.h
++++ b/qdf/linux/src/i_qdf_timer.h
+@@ -1,5 +1,6 @@
+ /*
+  * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+  *
+  * Permission to use, copy, modify, and/or distribute this software for
+  * any purpose with or without fee is hereby granted, provided that the
+@@ -154,6 +155,37 @@ static inline bool __qdf_timer_mod(struct __qdf_timer_t *timer, uint32_t msec)
+ 			 jiffies + __qdf_scaled_msecs_to_jiffies(msec));
+ }
+ 
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0))
++static inline bool __qdf_timer_stop(struct __qdf_timer_t *timer)
++{
++	return !!timer_delete(&timer->os_timer);
++}
++
++static inline void __qdf_timer_free(struct __qdf_timer_t *timer)
++{
++	struct timer_list *os_timer = &timer->os_timer;
++
++	timer_delete_sync(os_timer);
++
++	if (object_is_on_stack(os_timer))
++		timer_destroy_on_stack(os_timer);
++}
++
++static inline bool __qdf_timer_sync_cancel(struct __qdf_timer_t *timer)
++{
++	return timer_delete_sync(&timer->os_timer);
++}
++
++static inline int __qdf_timer_delete(struct timer_list *timer)
++{
++	return timer_delete(timer);
++}
++
++static inline int __qdf_timer_delete_sync(struct timer_list *timer)
++{
++	return timer_delete_sync(timer);
++}
++#else
+ static inline bool __qdf_timer_stop(struct __qdf_timer_t *timer)
+ {
+ 	return !!del_timer(&timer->os_timer);
+@@ -174,4 +206,15 @@ static inline bool __qdf_timer_sync_cancel(struct __qdf_timer_t *timer)
+ 	return del_timer_sync(&timer->os_timer);
+ }
+ 
++static inline int __qdf_timer_delete(struct timer_list *timer)
++{
++	return del_timer(timer);
++}
++
++static inline int __qdf_timer_delete_sync(struct timer_list *timer)
++{
++	return del_timer_sync(timer);
++}
++#endif /* KERNEL_VERSION(6, 15, 0)*/
++
+ #endif /* _I_QDF_TIMER_H */
+diff --git a/qdf/linux/src/qdf_mc_timer.c b/qdf/linux/src/qdf_mc_timer.c
+index 6d97847..b2e0ad9 100644
+--- a/qdf/linux/src/qdf_mc_timer.c
++++ b/qdf/linux/src/qdf_mc_timer.c
+@@ -1,6 +1,6 @@
+ /*
+  * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
+- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+  *
+  * Permission to use, copy, modify, and/or distribute this software for
+  * any purpose with or without fee is hereby granted, provided that the
+@@ -416,7 +416,7 @@ QDF_STATUS qdf_mc_timer_destroy(qdf_mc_timer_t *timer)
+ 
+ 	case QDF_TIMER_STATE_RUNNING:
+ 		/* Stop the timer first */
+-		del_timer(&(timer->platform_info.timer));
++		qdf_timer_delete(&timer->platform_info.timer);
+ 		v_status = QDF_STATUS_SUCCESS;
+ 		break;
+ 	case QDF_TIMER_STATE_STOPPED:
+@@ -482,7 +482,7 @@ QDF_STATUS qdf_mc_timer_destroy(qdf_mc_timer_t *timer)
+ 
+ 	case QDF_TIMER_STATE_RUNNING:
+ 		/* Stop the timer first */
+-		del_timer(&(timer->platform_info.timer));
++		qdf_timer_delete(&timer->platform_info.timer);
+ 		v_status = QDF_STATUS_SUCCESS;
+ 		break;
+ 
+@@ -617,7 +617,7 @@ QDF_STATUS qdf_mc_timer_stop(qdf_mc_timer_t *timer)
+ 
+ 	qdf_spin_unlock_irqrestore(&timer->platform_info.spinlock);
+ 
+-	del_timer(&(timer->platform_info.timer));
++	qdf_timer_delete(&timer->platform_info.timer);
+ 
+ 	qdf_spin_lock_irqsave(&timer->platform_info.spinlock);
+ 	timer->state = QDF_TIMER_STATE_STOPPED;
+@@ -659,7 +659,7 @@ QDF_STATUS qdf_mc_timer_stop_sync(qdf_mc_timer_t *timer)
+ 	timer->state = QDF_TIMER_STATE_STOPPED;
+ 
+ 	qdf_spin_unlock_irqrestore(&timer->platform_info.spinlock);
+-	del_timer_sync(&(timer->platform_info.timer));
++	qdf_timer_delete_sync(&timer->platform_info.timer);
+ 
+ 	qdf_try_allowing_sleep(timer->type);
+ 
+diff --git a/target_if/cfr/src/target_if_cfr.c b/target_if/cfr/src/target_if_cfr.c
+index 8a654f7..8a12b25 100644
+--- a/target_if/cfr/src/target_if_cfr.c
++++ b/target_if/cfr/src/target_if_cfr.c
+@@ -1,6 +1,6 @@
+ /*
+  * Copyright (c) 2019-2021 The Linux Foundation. All rights reserved.
+- * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+  *
+  * Permission to use, copy, modify, and/or distribute this software for
+  * any purpose with or without fee is hereby granted, provided that the
+@@ -814,7 +814,7 @@ QDF_STATUS target_if_cfr_config_rcc(struct wlan_objmgr_pdev *pdev,
+ 
+ 	rcc_info->pdev_id = target_if_cfr_get_pdev_id(pdev);
+ 	rcc_info->num_grp_tlvs =
+-		count_set_bits(rcc_info->modified_in_curr_session);
++		count_set_bits(&rcc_info->modified_in_curr_session[0]);
+ 
+ 	status = wmi_unified_send_cfr_rcc_cmd(pdev_wmi_handle, rcc_info);
+ 	return status;
+diff --git a/target_if/cfr/src/target_if_cfr_enh.c b/target_if/cfr/src/target_if_cfr_enh.c
+index e494831..3f9ebb0 100644
+--- a/target_if/cfr/src/target_if_cfr_enh.c
++++ b/target_if/cfr/src/target_if_cfr_enh.c
+@@ -1,6 +1,6 @@
+ /*
+  * Copyright (c) 2019-2021 The Linux Foundation. All rights reserved.
+- * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+  *
+  * Permission to use, copy, modify, and/or distribute this software for
+  * any purpose with or without fee is hereby granted, provided that the
+@@ -2373,8 +2373,9 @@ void target_if_cfr_update_global_cfg(struct wlan_objmgr_pdev *pdev)
+ 	}
+ 
+ 	for (grp_id = 0; grp_id < MAX_TA_RA_ENTRIES; grp_id++) {
+-		if (qdf_test_bit(grp_id,
+-				 &pcfr->rcc_param.modified_in_curr_session)) {
++		if (qdf_atomic_test_bit(
++				grp_id,
++				pcfr->rcc_param.modified_in_curr_session)) {
+ 			/* Populating global config based on user's input */
+ 			glbl_cfg = &pcfr->global[grp_id];
+ 			curr_cfg = &pcfr->rcc_param.curr[grp_id];
+@@ -2490,7 +2491,7 @@ QDF_STATUS cfr_enh_init_pdev(struct wlan_objmgr_psoc *psoc,
+ 
+ 	pcfr->is_cfr_rcc_capable = 1;
+ 	pcfr->rcc_param.pdev_id = wlan_objmgr_pdev_get_pdev_id(pdev);
+-	pcfr->rcc_param.modified_in_curr_session = MAX_RESET_CFG_ENTRY;
++	pcfr->rcc_param.modified_in_curr_session[0] = MAX_RESET_CFG_ENTRY;
+ 	pcfr->rcc_param.num_grp_tlvs = MAX_TA_RA_ENTRIES;
+ 	pcfr->rcc_param.vdev_id = CFR_INVALID_VDEV_ID;
+ 	pcfr->rcc_param.srng_id = DEFAULT_SRNGID_CFR;
+@@ -2521,7 +2522,7 @@ QDF_STATUS cfr_enh_init_pdev(struct wlan_objmgr_psoc *psoc,
+ 		return status;
+ 	}
+ 
+-	pcfr->rcc_param.modified_in_curr_session = 0;
++	pcfr->rcc_param.modified_in_curr_session[0] = 0;
+ 
+ 	pcfr->cfr_max_sta_count = MAX_CFR_ENABLED_CLIENTS;
+ 
+diff --git a/target_if/crypto/src/target_if_crypto.c b/target_if/crypto/src/target_if_crypto.c
+index 59ab316..98c5e0e 100644
+--- a/target_if/crypto/src/target_if_crypto.c
++++ b/target_if/crypto/src/target_if_crypto.c
+@@ -1,6 +1,6 @@
+ /*
+  * Copyright (c) 2019-2021 The Linux Foundation. All rights reserved.
+- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+  *
+  * Permission to use, copy, modify, and/or distribute this software for
+  * any purpose with or without fee is hereby granted, provided that the
+@@ -365,6 +365,17 @@ target_if_crypto_install_key_comp_evt_handler(void *handle, uint8_t *event,
+ 	qdf_mem_copy(result.peer_macaddr, params.peer_macaddr,
+ 		     QDF_MAC_ADDR_SIZE);
+ 
++	if (!result.status) {
++		struct wlan_crypto_key *crypto_key;
++
++		crypto_key = wlan_crypto_get_key(vdev, result.peer_macaddr,
++						 result.key_ix);
++		if (crypto_key && crypto_key->keylen)
++			wlan_peer_set_key_install_flag(psoc,
++						       result.peer_macaddr,
++						       true);
++	}
++
+ 	if (priv_obj->add_key_cb)
+ 		priv_obj->add_key_cb(priv_obj->add_key_ctx, &result);
+ 
+diff --git a/umac/cfr/dispatcher/inc/wlan_cfr_utils_api.h b/umac/cfr/dispatcher/inc/wlan_cfr_utils_api.h
+index f5a1566..cbfac3d 100644
+--- a/umac/cfr/dispatcher/inc/wlan_cfr_utils_api.h
++++ b/umac/cfr/dispatcher/inc/wlan_cfr_utils_api.h
+@@ -1,6 +1,6 @@
+ /*
+  * Copyright (c) 2019-2021 The Linux Foundation. All rights reserved.
+- * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+  *
+  * Permission to use, copy, modify, and/or distribute this software for
+  * any purpose with or without fee is hereby granted, provided that the
+@@ -499,7 +499,7 @@ struct cfr_rcc_param {
+ 	uint8_t num_grp_tlvs;
+ 
+ 	struct ta_ra_cfr_cfg curr[MAX_TA_RA_ENTRIES];
+-	unsigned long modified_in_curr_session;
++	qdf_bitmap(modified_in_curr_session, MAX_TA_RA_ENTRIES);
+ 	uint32_t capture_count            :16,
+ 		 capture_intval_mode_sel  :1,
+ 		 rsvd2                    :15;
+@@ -746,11 +746,11 @@ QDF_STATUS wlan_cfr_pdev_close(struct wlan_objmgr_pdev *pdev);
+ 
+ /**
+  * count_set_bits() - function to count set bits in a bitmap
+- * @value: input bitmap
++ * @bitmap: input bitmap
+  *
+  * Return: No. of set bits
+  */
+-uint8_t count_set_bits(unsigned long value);
++uint8_t count_set_bits(unsigned long *bitmap);
+ 
+ /**
+  * wlan_cfr_is_feature_disabled() - Check if cfr feature is disabled
+diff --git a/umac/cfr/dispatcher/src/wlan_cfr_ucfg_api.c b/umac/cfr/dispatcher/src/wlan_cfr_ucfg_api.c
+index fdb4a92..d6f77a3 100644
+--- a/umac/cfr/dispatcher/src/wlan_cfr_ucfg_api.c
++++ b/umac/cfr/dispatcher/src/wlan_cfr_ucfg_api.c
+@@ -1,6 +1,6 @@
+ /*
+  * Copyright (c) 2019-2021 The Linux Foundation. All rights reserved.
+- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+  *
+  * Permission to use, copy, modify, and/or distribute this software for
+  * any purpose with or without fee is hereby granted, provided that the
+@@ -534,7 +534,7 @@ QDF_STATUS ucfg_cfr_set_reset_bitmap(struct wlan_objmgr_vdev *vdev,
+ 	if (status != QDF_STATUS_SUCCESS)
+ 		return status;
+ 
+-	pcfr->rcc_param.modified_in_curr_session |= params->reset_cfg;
++	pcfr->rcc_param.modified_in_curr_session[0] |= params->reset_cfg;
+ 	tgt_cfr_default_ta_ra_cfg(pdev, &pcfr->rcc_param,
+ 				  true, params->reset_cfg);
+ 
+@@ -813,8 +813,8 @@ ucfg_cfr_set_frame_type_subtype(struct wlan_objmgr_vdev *vdev,
+ 	curr_cfg->valid_ctrl_subtype = 1;
+ 	curr_cfg->valid_data_subtype = 1;
+ 
+-	qdf_set_bit(params->grp_id,
+-		    &pcfr->rcc_param.modified_in_curr_session);
++	qdf_atomic_set_bit(params->grp_id,
++			   pcfr->rcc_param.modified_in_curr_session);
+ 
+ 	wlan_objmgr_pdev_release_ref(pdev, WLAN_CFR_ID);
+ 
+@@ -856,8 +856,8 @@ QDF_STATUS ucfg_cfr_set_bw_nss(struct wlan_objmgr_vdev *vdev,
+ 	curr_cfg->valid_bw_mask = 1;
+ 	curr_cfg->valid_nss_mask = 1;
+ 
+-	qdf_set_bit(params->grp_id,
+-		    &pcfr->rcc_param.modified_in_curr_session);
++	qdf_atomic_set_bit(params->grp_id,
++			   pcfr->rcc_param.modified_in_curr_session);
+ 
+ 	wlan_objmgr_pdev_release_ref(pdev, WLAN_CFR_ID);
+ 
+@@ -904,8 +904,8 @@ QDF_STATUS ucfg_cfr_set_tara_config(struct wlan_objmgr_vdev *vdev,
+ 	curr_cfg->valid_ra = 1;
+ 	curr_cfg->valid_ra_mask = 1;
+ 
+-	qdf_set_bit(params->grp_id,
+-		    &pcfr->rcc_param.modified_in_curr_session);
++	qdf_atomic_set_bit(params->grp_id,
++			   pcfr->rcc_param.modified_in_curr_session);
+ 
+ 	wlan_objmgr_pdev_release_ref(pdev, WLAN_CFR_ID);
+ 
+@@ -970,7 +970,7 @@ QDF_STATUS ucfg_cfr_get_cfg(struct wlan_objmgr_vdev *vdev)
+ 	cfr_err("Enabled CFG id bitmap : 0x%x\n",
+ 		pcfr->rcc_param.filter_group_bitmap);
+ 	cfr_err(" Modified cfg id bitmap : %lu\n",
+-		pcfr->rcc_param.modified_in_curr_session);
++		pcfr->rcc_param.modified_in_curr_session[0]);
+ 
+ 	cfr_err("TARA_CONFIG details:\n");
+ 
+@@ -1350,7 +1350,7 @@ QDF_STATUS ucfg_cfr_committed_rcc_config(struct wlan_objmgr_vdev *vdev)
+ 	}
+ 
+ 	pcfr->rcc_param.num_grp_tlvs = 0;
+-	pcfr->rcc_param.modified_in_curr_session = 0;
++	pcfr->rcc_param.modified_in_curr_session[0] = 0;
+ 	wlan_objmgr_pdev_release_ref(pdev, WLAN_CFR_ID);
+ 
+ 	return status;
+diff --git a/umac/cfr/dispatcher/src/wlan_cfr_utils_api.c b/umac/cfr/dispatcher/src/wlan_cfr_utils_api.c
+index 080fa42..d05d7bc 100644
+--- a/umac/cfr/dispatcher/src/wlan_cfr_utils_api.c
++++ b/umac/cfr/dispatcher/src/wlan_cfr_utils_api.c
+@@ -1,6 +1,6 @@
+ /*
+  * Copyright (c) 2019-2020 The Linux Foundation. All rights reserved.
+- * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+  *
+  * Permission to use, copy, modify, and/or distribute this software for
+  * any purpose with or without fee is hereby granted, provided that the
+@@ -180,9 +180,10 @@ QDF_STATUS cfr_deinitialize_pdev(struct wlan_objmgr_pdev *pdev)
+ }
+ qdf_export_symbol(cfr_deinitialize_pdev);
+ 
+-uint8_t count_set_bits(unsigned long value)
++uint8_t count_set_bits(unsigned long *bitmap)
+ {
+ 	uint8_t count = 0;
++	unsigned long value = bitmap[0];
+ 
+ 	while (value) {
+ 		value &= (value - 1);
+diff --git a/umac/cmn_services/obj_mgr/inc/wlan_objmgr_peer_obj.h b/umac/cmn_services/obj_mgr/inc/wlan_objmgr_peer_obj.h
+index 63c751b..3764e40 100644
+--- a/umac/cmn_services/obj_mgr/inc/wlan_objmgr_peer_obj.h
++++ b/umac/cmn_services/obj_mgr/inc/wlan_objmgr_peer_obj.h
+@@ -140,6 +140,7 @@ enum wlan_peer_state {
+  * @rssi:            Last received RSSI value
+  * @is_authenticated: true if peer is authenticated
+  * @assoc_peer:      assoc req/response is handled in this peer
++ * @is_key_installed: key install flag
+  */
+ struct wlan_objmgr_peer_mlme {
+ 	uint32_t peer_capinfo;
+@@ -155,6 +156,7 @@ struct wlan_objmgr_peer_mlme {
+ #ifdef WLAN_FEATURE_11BE_MLO
+ 	bool assoc_peer;
+ #endif
++	bool is_key_installed;
+ };
+ 
+ /**
+@@ -1421,4 +1423,51 @@ wlan_objmgr_peer_trace_del_ref_list(struct wlan_objmgr_peer *peer)
+ }
+ #endif
+ 
++/**
++ * wlan_peer_mlme_set_key_install_flag() - API to set key install flag
++ * @peer: peer object
++ * @is_key_installed: key install flag
++ *
++ * Return: void
++ */
++static inline void wlan_peer_mlme_set_key_install_flag(
++						struct wlan_objmgr_peer *peer,
++						bool is_key_installed)
++{
++	peer->peer_mlme.is_key_installed = is_key_installed;
++}
++
++/**
++ * wlan_peer_mlme_get_key_install_flag() - API to get key install flag
++ * @peer: peer object
++ *
++ * Return: key install flag
++ */
++static inline bool wlan_peer_mlme_get_key_install_flag(
++						struct wlan_objmgr_peer *peer)
++{
++	return peer->peer_mlme.is_key_installed;
++}
++
++/**
++ * wlan_peer_set_key_install_flag() - API to set key install flag
++ * @psoc: PSOC object
++ * @peer_mac_addr: Peer MAC address
++ * @is_key_installed: key install flag
++ *
++ * Return: none
++ */
++void wlan_peer_set_key_install_flag(struct wlan_objmgr_psoc *psoc,
++				    uint8_t *peer_mac_addr,
++				    bool is_key_installed);
++
++/**
++ * wlan_peer_is_key_installed() - API to get key install flag
++ * @psoc: PSOC object
++ * @peer_mac_addr: Peer MAC address
++ *
++ * Return: true if key is installed otherwise false
++ */
++bool wlan_peer_is_key_installed(struct wlan_objmgr_psoc *psoc,
++				uint8_t *peer_mac_addr);
+ #endif /* _WLAN_OBJMGR_PEER_OBJ_H_*/
+diff --git a/umac/cmn_services/obj_mgr/src/wlan_objmgr_peer_obj.c b/umac/cmn_services/obj_mgr/src/wlan_objmgr_peer_obj.c
+index 5ac3265..bc173f6 100644
+--- a/umac/cmn_services/obj_mgr/src/wlan_objmgr_peer_obj.c
++++ b/umac/cmn_services/obj_mgr/src/wlan_objmgr_peer_obj.c
+@@ -1563,3 +1563,41 @@ QDF_STATUS wlan_peer_update_macaddr(struct wlan_objmgr_peer *peer,
+ 	return QDF_STATUS_SUCCESS;
+ }
+ #endif
++
++bool wlan_peer_is_key_installed(struct wlan_objmgr_psoc *psoc,
++				uint8_t *peer_mac_addr)
++{
++	struct wlan_objmgr_peer *peer;
++	bool is_key_installed;
++
++	peer = wlan_objmgr_get_peer_by_mac(psoc, peer_mac_addr,
++					   WLAN_OBJMGR_ID);
++	if (!peer)
++		return false;
++
++	is_key_installed =  wlan_peer_mlme_get_key_install_flag(peer);
++
++	obj_mgr_debug(QDF_MAC_ADDR_FMT " key installed %d",
++		      QDF_MAC_ADDR_REF(peer_mac_addr), is_key_installed);
++
++	wlan_objmgr_peer_release_ref(peer, WLAN_OBJMGR_ID);
++	return is_key_installed;
++}
++
++void wlan_peer_set_key_install_flag(struct wlan_objmgr_psoc *psoc,
++				    uint8_t *peer_mac_addr,
++				    bool is_key_installed)
++{
++	struct wlan_objmgr_peer *peer;
++
++	peer = wlan_objmgr_get_peer_by_mac(psoc, peer_mac_addr,
++					   WLAN_OBJMGR_ID);
++	if (!peer)
++		return;
++
++	obj_mgr_debug(QDF_MAC_ADDR_FMT " key installed %d",
++		      QDF_MAC_ADDR_REF(peer_mac_addr), is_key_installed);
++
++	wlan_peer_mlme_set_key_install_flag(peer, is_key_installed);
++	wlan_objmgr_peer_release_ref(peer, WLAN_OBJMGR_ID);
++}
+diff --git a/umac/scan/core/src/wlan_scan_cache_db.c b/umac/scan/core/src/wlan_scan_cache_db.c
+index 171e218..8cae90b 100644
+--- a/umac/scan/core/src/wlan_scan_cache_db.c
++++ b/umac/scan/core/src/wlan_scan_cache_db.c
+@@ -56,6 +56,7 @@
+ #include "wlan_crypto_def_i.h"
+ #include "wlan_crypto_global_api.h"
+ #include "wlan_cm_bss_score_param.h"
++#include <wlan_action_oui_main.h>
+ 
+ #ifdef FEATURE_6G_SCAN_CHAN_SORT_ALGO
+ 
+@@ -1181,6 +1182,46 @@ static bool scm_is_bss_allowed_for_country(struct wlan_objmgr_psoc *psoc,
+ }
+ #endif
+ 
++/**
++ * scm_skip_bcn_ch_mismatch_check_by_oui() - check chan mismatch beacon
++ * frame drop or not based on OUI config
++ * @psoc: psoc ptr
++ * @scan_entry: scan entry
++ * @bcn: beacon frame info
++ *
++ * For some IOT APs, they are always switching channel for STA to scan and
++ * find it, but not connecting to it. But such behaviour APs, don't drop
++ * the beacon if channel mismatching.
++ *
++ * Return: QDF_STATUS
++ */
++static bool scm_skip_bcn_ch_mismatch_check_by_oui(
++			struct wlan_objmgr_psoc *psoc,
++			struct scan_cache_entry *scan_entry,
++			struct scan_bcn_probe_event *bcn)
++{
++	struct action_oui_search_attr attr;
++
++	qdf_mem_zero(&attr, sizeof(attr));
++	attr.ie_data = util_scan_entry_ie_data(scan_entry);
++	attr.ie_length = util_scan_entry_ie_len(scan_entry);
++
++	if (!wlan_action_oui_search(psoc, &attr,
++				    ACTION_OUI_SKIP_BCN_CH_MISMATCH_CHK))
++		return false;
++
++	scm_nofl_debug(QDF_MAC_ADDR_FMT ": frame(%d) chan mismatch no-drop by oui, seq %d frame freq %d rx data freq %d RSSI %d",
++		       QDF_MAC_ADDR_REF(
++		       scan_entry->bssid.bytes),
++		       bcn->frm_type,
++		       scan_entry->seq_num,
++		       scan_entry->channel.chan_freq,
++		       bcn->rx_data->chan_freq,
++		       scan_entry->rssi_raw);
++
++	return true;
++}
++
+ /**
+  * scm_is_p2p_wildcard_ssid() - check p2p wildcard ssid or not
+  * @scan_entry: scan entry
+@@ -1288,7 +1329,9 @@ QDF_STATUS __scm_handle_bcn_probe(struct scan_bcn_probe_event *bcn)
+ 		scan_entry = scan_node->entry;
+ 
+ 		if (scan_obj->drop_bcn_on_chan_mismatch &&
+-		    scan_entry->channel_mismatch) {
++		    scan_entry->channel_mismatch &&
++		    !scm_skip_bcn_ch_mismatch_check_by_oui(psoc, scan_entry,
++							   bcn)) {
+ 			scm_nofl_debug(QDF_MAC_ADDR_FMT ": Drop frame(%d) for chan mismatch, seq %d frame freq %d rx data freq %d RSSI %d",
+ 				       QDF_MAC_ADDR_REF(
+ 				       scan_entry->bssid.bytes),
+diff --git a/wmi/src/wmi_unified_cfr_tlv.c b/wmi/src/wmi_unified_cfr_tlv.c
+index 345178e..cf19bdb 100644
+--- a/wmi/src/wmi_unified_cfr_tlv.c
++++ b/wmi/src/wmi_unified_cfr_tlv.c
+@@ -1,6 +1,6 @@
+ /*
+  * Copyright (c) 2019-2021, The Linux Foundation. All rights reserved.
+- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+  *
+  * Permission to use, copy, modify, and/or distribute this software for any
+  * purpose with or without fee is hereby granted, provided that the above
+@@ -217,8 +217,9 @@ static QDF_STATUS send_cfr_rcc_cmd_tlv(wmi_unified_t wmi_handle,
+ 		param = (wmi_cfr_filter_group_config *)buf_ptr;
+ 
+ 		for (grp_id = 0; grp_id < MAX_TA_RA_ENTRIES; grp_id++) {
+-			if (qdf_test_bit(grp_id,
+-					 &rcc->modified_in_curr_session)) {
++			if (qdf_atomic_test_bit(
++					grp_id,
++					rcc->modified_in_curr_session)) {
+ 				populate_wmi_cfr_param(grp_id, rcc, param);
+ 				param++;
+ 			}

@@ -2,7 +2,7 @@
 
 *[In English →](README.md)*
 
-Модуль Magisk / KernelSU, що додає до **Nothing Phone (3)** функції рівня ядра, потрібні Kali NetHunter, — **без заміни ядра**. Зовнішній USB Wi-Fi (monitor mode + injection), USB Bluetooth, **вбудований** Bluetooth і monitor mode Wi-Fi телефона, USB-serial, USB-net і CAN реалізовані як завантажувані модулі ядра плюс кілька userspace-утиліт, усе зібране під стокове ядро Google GKI.
+Модуль Magisk / KernelSU, що додає до **Nothing Phone (3)** функції рівня ядра, потрібні Kali NetHunter, — **без заміни ядра**. Зовнішній USB Wi-Fi (monitor mode + injection), USB Bluetooth, **вбудований** Bluetooth і monitor mode Wi-Fi телефона (а також injection на вбудованому Wi-Fi через необов'язковий другий модуль), USB-serial, USB-net і CAN реалізовані як завантажувані модулі ядра плюс кілька userspace-утиліт, усе зібране під стокове ядро Google GKI.
 
 > **Пристрій:** Nothing Phone (3) (кодова назва *Metroid*, платформа `sun`)
 > **Збірка, під яку зроблено:** Nothing OS C5.0 (`ab15756704`), ядро `6.6.127-android15-8-gf0987337fa35-ab15756704-4k`
@@ -38,7 +38,8 @@
 |---|---|---|
 | 62 драйвери вантажаться у стокове ядро | ✅ | `loaded=62 failed=0`, без помилок ядра, автозавантаження при старті |
 | Вбудований Bluetooth як Linux `hci0` (`nh-bt` + `nh-btbridge`) | ✅ | класичне сканування + LE; працює під SELinux Enforcing |
-| **Monitor mode** вбудованого Wi-Fi (`nh-wlan`) | ✅ | захоплення на 2.4/5 ГГц, перемикання каналів; **лише приймання, без injection** |
+| **Monitor mode** вбудованого Wi-Fi (`nh-wlan`) | ✅ | захоплення на 2.4/5 ГГц, перемикання каналів; зі стоковим драйвером лише приймання |
+| **Packet injection** на вбудованому Wi-Fi (необов'язковий модуль `nethunter-wlan-inject`) | ✅ | перезібраний драйвер Wi-Fi, **ядро так само стокове**: `aireplay-ng --test` 30/30 на 2.4 і 5 ГГц, рівне приймання в моніторі — див. [wlan-inject](wlan-inject/README.uk.md) |
 | USB Arsenal: HID клавіатура+миша, mass storage, ACM, ECM | ✅ | USB-функції визначаються хостом (гаджет зі стокового ядра) |
 | Фікс 32-бітного busybox NetHunter (`nh-fix-nethunter`) | ✅ | 64-бітному пристрою потрібен 64-бітний busybox; застосовується щозавантаження |
 | Фікс `su: unknown user root` у NetHunter | ✅ | команди з `su` тепер працюють з NetHunter Terminal |
@@ -68,7 +69,6 @@
 
 | Функція | Причина | Обхід |
 |---|---|---|
-| Injection на **вбудованому** Wi-Fi | monitor mode Qualcomm `qca_cld3` лише приймає (`aireplay-ng --test`: 0/30) | зовнішній USB-адаптер |
 | PostgreSQL для БД Metasploit (`CONFIG_SYSVIPC`) | вмикання змінює `task_struct` → ламає KMI і всі вендорські модулі | msfconsole без БД, або БД на іншій машині |
 | CAN ISO-TP / J1939 у ядрі | `can_proto_register` та ін. захищені в GKI `can.ko` | userspace `python-can-isotp` / `j1939` поверх `can_raw` |
 | BNEP (Bluetooth PAN) | `bt_sock_register` поза KMI | — |
@@ -118,6 +118,18 @@ adb shell su -c "nh-kmod status"
 
 **4 — Kali NetHunter.** Встановіть **NetHunter Generic ARM64 (Full)** для Magisk з [kali.org](https://www.kali.org/get-kali/#kali-mobile) (окремого образу під Phone (3) немає, generic правильний), перезавантажте, налаштуйте Kali chroot у застосунку. Фікси NetHunter нижче застосовуються автоматично при встановленні/завантаженні модуля.
 
+
+**5 — Injection на вбудованому Wi-Fi (необов'язково).** Так само прошийте другий модуль, `nethunter-wlan-inject-metroid-ab15756704-v2.zip` з [Releases](../../releases), і перезавантажте. Він підміняє стоковий драйвер Wi-Fi **у пам'яті** на перезібраний — тієї самої версії, з виправленнями монітора та інжекцією кадрів; стоковий файл у `vendor_dlkm` не змінюється і повертається після будь-якого перезавантаження без модуля. Перша підміна ручна, як і `nh-kmod load`:
+
+```bash
+adb shell su -c "nh-wlan-driver swap"     # очікуйте: Swap OK ... Swap on boot enabled
+adb shell su -c "nh-wlan monitor 9"       # monitor mode: wlan0 (receive + injection)
+```
+
+Модуль прив'язаний саме до цієї збірки прошивки (перевіряються ядро, збірка vendor і стоковий драйвер) і після оновлення Nothing OS нічого не робить, доки драйвер не перезберуть. Результати тестів, обмеження і запобіжники: [wlan-inject/README.uk.md](wlan-inject/README.uk.md).
+
+> Із zip `nethunter-kmods` з релізу v1.0 команда `nh-wlan monitor` досі друкує `receive only, no injection`. Цей текст застарів — у цьому дереві його виправлено, і він вийде з наступною збіркою `nethunter-kmods`. Який драйвер завантажено насправді, показує `nh-wlan-driver status`.
+
 ---
 
 ## Команди-утиліти
@@ -128,6 +140,7 @@ adb shell su -c "nh-kmod status"
 |---|---|
 | `nh-kmod load \| unload \| status \| autoload on\|off` | завантажити/вивантажити драйвери, показати стан |
 | `nh-wlan monitor [канал] \| managed \| channel N \| status` | monitor mode вбудованого Wi-Fi (типово канал 6 — **обов'язковий**, без каналу монітор мертвий) |
+| `nh-wlan-driver swap \| restore \| status \| autoswap on\|off` | (модуль `nethunter-wlan-inject`) підмінити драйвер вбудованого Wi-Fi на збірку з injection або повернути стоковий |
 | `nh-bt start \| stop \| status \| install-bluebinder` | вбудований Bluetooth як `hci0` через AIDL-міст |
 | `nh-fix-nethunter boot \| cache \| commands \| su \| check` | фікси NetHunter нижче |
 
@@ -164,15 +177,19 @@ tools/build-all.sh 15756704 f0987337fa351d7e303b071df533fd4c1c194687
 
 Після оновлення Nothing OS повторіть крок 1 з новим `vendor_dlkm`/конфігом і `tools/build-all.sh <новий ab> <новий sha>`.
 
+Драйвер вбудованого Wi-Fi збирається окремо (йому потрібні джерела ядра Nothing, а не Google): [wlan-inject/README.uk.md](wlan-inject/README.uk.md).
+
 ### Структура
 
 ```
 module/nethunter-kmods/   Модуль Magisk/KernelSU: скрипти-утиліти (.ko/прошивки збираються, не комітяться)
+module/nethunter-wlan-inject/  другий модуль: підміняє драйвер вбудованого Wi-Fi після старту (.ko збирається, не комітиться)
+wlan-inject/              як зібрати цей драйвер: дельта апстріму, паритет зі стоковою збіркою, патчі injection, перевірки
 btbridge/nh-btbridge.c    Міст AIDL Bluetooth HAL ↔ /dev/vhci  (+ build.sh)
 patches/                  5 мінімальних патчів драйверів, по одному файлу, кожен пояснено
 config/                   фрагмент конфігу ядра: що додано і що неможливо та чому
 oot/                      модуль minstrel_ht + наш клей для out-of-tree Realtek-драйверів
-tools/                    build-all.sh, fetch-*.sh, check_gki_access.py (симулятор завантаження GKI), kocrc.py
+tools/                    build-all.sh, fetch-*.sh, check_gki_access.py (симулятор завантаження GKI), kocrc.py, pack-wlan-inject.sh
 docker/                   образ збірки clang-18 arm64
 ```
 
@@ -180,13 +197,14 @@ docker/                   образ збірки clang-18 arm64
 
 ## Видалення
 
-Magisk → *Modules* → видалити `nethunter-kmods` (і NetHunter) → Reboot, потім прошити стоковий `init_boot.img`. Заблокувати завантажувач (стирає дані, лише стокова прошивка): `fastboot flashing lock`.
+Magisk → *Modules* → видалити `nethunter-kmods`, `nethunter-wlan-inject` (і NetHunter) → Reboot, потім прошити стоковий `init_boot.img`. Заблокувати завантажувач (стирає дані, лише стокова прошивка): `fastboot flashing lock`.
 
 ## Ліцензія
 
 - Скрипти, патчі, `nh-btbridge.c` і обгортка minstrel — **GPL-2.0** (похідні від ядра), див. [LICENSE](LICENSE).
 - Репозиторій **не** містить: пропрієтарних образів Nothing, бінарників ядра Google, системних бібліотек пристрою, жодних прошивкових блобів. Збірка підтягує їх з першоджерел; `fetch-devlibs.sh` бере бібліотеки для лінкування з вашого ж пристрою.
 - Release-zip містить прошивки з [linux-firmware](https://gitlab.com/kernel-firmware/linux-firmware) під їхніми вендорськими ліцензіями (див. `WHENCE` того проєкту).
+- `wlan-inject/patches/` змінює джерела Qualcomm qcacld-3.0 / qca-wifi-host-cmn / fw-api і зберігає їхню ліцензію ISC; монітор та injection — робота [Loukious](https://github.com/Loukious/vendor_qcom_opensource_wlan), дельта версій — з CodeLinaro. Походження кожного файла: [wlan-inject/README.uk.md](wlan-inject/README.uk.md).
 - Out-of-tree Wi-Fi драйвери — окремі проєкти: [morrownr/8812au-20210820](https://github.com/morrownr/8812au-20210820), [morrownr/8814au](https://github.com/morrownr/8814au), [aircrack-ng/rtl8188eus](https://github.com/aircrack-ng/rtl8188eus).
 
 ## Дисклеймер

@@ -1,0 +1,157 @@
+#!/system/bin/sh
+# nh-wlan-driver swap|restore|status|autoswap [on|off]
+# Підміна стокового драйвера вбудованого Wi-Fi (qca_cld3_wcn7750) на власну збірку з монітором
+# та інжекцією. Підміна живе до перезавантаження; на старті її повторює service.sh модуля.
+# Сам режим монітора вмикає nh-wlan (модуль nethunter-kmods): nh-wlan monitor <канал>.
+MODDIR="${NH_WLAN_MODDIR:-/data/adb/modules/nethunter-wlan-inject}"
+NAME=qca_cld3_wcn7750
+OURS="$MODDIR/$NAME.ko"
+STOCK="/vendor_dlkm/lib/modules/$NAME.ko"
+SYS="/sys/module/$NAME"
+LOG="$MODDIR/swap.log"
+MARK="$MODDIR/swapping"
+SETTLE="${NH_WLAN_SETTLE:-20}"
+
+say() { echo "$*"; echo "[$(date '+%F %T')] $*" >> "$LOG" 2>/dev/null; }
+# cmd передає stdin/stdout у system_server — лише pipe і stdin=/dev/null (SELinux Enforcing)
+wifi_enabled() { cmd wifi status </dev/null 2>/dev/null | grep -q "Wifi is enabled"; }
+wifi_set() { cmd wifi set-wifi-enabled "$1" </dev/null >/dev/null 2>&1; }
+# Чи має Wi-Fi бути увімкнений: зважаємо і на збережене налаштування (1 = увімкнено, 2 = увімкнено
+# в режимі польоту), бо одразу після запиту на ввімкнення status ще показує "disabled"
+wifi_wanted() {
+  case "$(settings get global wifi_on 2>/dev/null)" in 1|2) return 0 ;; esac
+  wifi_enabled
+}
+wifi_back_on() { wifi_set enabled; wait_for wifi_enabled 15; }
+# наша збірка впізнається за параметром інжекції, якого у стоковому драйвері немає
+is_ours() { [ -e "$SYS/parameters/injection_dp_inflight_limit" ]; }
+refcnt_zero() { [ "$(cat "$SYS/refcnt" 2>/dev/null)" = "0" ]; }
+wait_for() { # $1=команда-умова, $2=секунди
+  i=0
+  while ! eval "$1"; do
+    i=$((i+1)); [ "$i" -ge "$2" ] && return 1
+    sleep 1
+  done
+  return 0
+}
+
+# Запобіжник сумісності: ядро, прошивка і стоковий драйвер — саме ті, під які нашу збірку
+# зібрано й перевірено. Після оновлення Nothing OS хоч одне з трьох зміниться — тоді не підміняємо:
+# драйвер, що не відповідає прошивці Wi-Fi, перезавантажує телефон у момент увімкнення Wi-Fi.
+guard() {
+  want_k="$(cat "$MODDIR/kernel.release" 2>/dev/null)"
+  want_f="$(cat "$MODDIR/vendor.fingerprint" 2>/dev/null)"
+  want_s="$(cat "$MODDIR/stock.sha256" 2>/dev/null)"
+  if [ -z "$want_k" ] || [ -z "$want_f" ] || [ -z "$want_s" ] || [ ! -f "$OURS" ]; then
+    say "Module files are incomplete in $MODDIR - not swapping"; return 1
+  fi
+  if [ "$(uname -r)" != "$want_k" ]; then
+    say "Kernel $(uname -r) != $want_k (Nothing OS update?) - not swapping, rebuild required"; return 1
+  fi
+  if [ "$(getprop ro.vendor.build.fingerprint)" != "$want_f" ]; then
+    say "Vendor build $(getprop ro.vendor.build.fingerprint) != $want_f - not swapping, rebuild required"; return 1
+  fi
+  if [ "$(sha256sum "$STOCK" 2>/dev/null | cut -d' ' -f1)" != "$want_s" ]; then
+    say "Stock driver $STOCK differs from the one this build was matched to - not swapping"; return 1
+  fi
+  return 0
+}
+
+# Вимикає Wi-Fi в Android і чекає, поки драйвер звільниться. Друкує 1, якщо Wi-Fi був увімкнений.
+wifi_down() {
+  was=0; wifi_wanted && was=1
+  if [ "$was" = "1" ]; then
+    wifi_set disabled
+    wait_for '! wifi_enabled' 15
+    sleep 4
+  fi
+  ip link set wlan0 down 2>/dev/null
+  echo "$was"
+}
+
+case "$1" in
+  swap)
+    guard || exit 2
+    if is_ours; then say "Injection driver is already loaded"; exit 0; fi
+    if [ ! -d "$SYS" ]; then say "Stock driver $NAME is not loaded - nothing to swap"; exit 3; fi
+    if [ "$(cat "$SYS/parameters/con_mode" 2>/dev/null)" != "0" ]; then
+      say "Driver is not in normal mode (monitor?) - run first: nh-wlan managed"; exit 3
+    fi
+    if [ -f "$MODDIR/crashed" ]; then
+      say "Warning: the previous swap was interrupted by a reboot ($(cat "$MODDIR/crashed"))"
+      rm -f "$MODDIR/crashed"
+    fi
+    # маркер на диску до будь-яких дій: якщо телефон перезавантажиться посеред підміни,
+    # service.sh побачить його на наступному старті й вимкне автопідміну
+    echo "$(date '+%F %T')" > "$MARK"; sync
+    was="$(wifi_down)"
+    if ! wait_for refcnt_zero 30; then
+      say "Driver is still in use (refcnt $(cat "$SYS/refcnt" 2>/dev/null)) - keeping the stock driver"
+      [ "$was" = "1" ] && wifi_back_on
+      rm -f "$MARK"; sync; exit 4
+    fi
+    if ! rmmod "$NAME" 2>>"$LOG"; then
+      say "Could not unload the stock driver - keeping it"
+      [ "$was" = "1" ] && wifi_back_on
+      rm -f "$MARK"; sync; exit 4
+    fi
+    sleep 2
+    if ! insmod "$OURS" 2>>"$LOG"; then
+      say "Kernel refused the injection driver - restoring the stock one"
+      insmod "$STOCK" 2>>"$LOG" || say "Could not restore the stock driver (a reboot restores it)"
+      sleep 3
+      [ "$was" = "1" ] && wifi_back_on
+      rm -f "$MARK"; sync; exit 5
+    fi
+    sleep 3
+    [ "$was" = "1" ] && wifi_back_on
+    # прошивка Wi-Fi піднімається одразу після insmod і ще раз після ввімкнення Wi-Fi;
+    # невідповідний драйвер перезавантажує телефон саме в ці секунди — чекаємо із запасом
+    sleep "$SETTLE"
+    if ! is_ours; then
+      say "Injection driver is not loaded after the swap - check dmesg"
+      rm -f "$MARK"; sync; exit 6
+    fi
+    rm -f "$MARK"; sync
+    say "Swap OK: injection driver loaded (Wi-Fi $([ "$was" = "1" ] && echo "turned back on" || echo "left off"))"
+    if [ ! -f "$MODDIR/autoswap" ]; then
+      touch "$MODDIR/autoswap"
+      say "Swap on boot enabled (disable: nh-wlan-driver autoswap off)"
+    fi
+    ;;
+  restore)
+    if [ -d "$SYS" ] && ! is_ours; then say "Stock driver is already loaded"; exit 0; fi
+    if [ -d "$SYS" ] && [ "$(cat "$SYS/parameters/con_mode" 2>/dev/null)" != "0" ]; then
+      say "Driver is not in normal mode (monitor?) - run first: nh-wlan managed"; exit 3
+    fi
+    was="$(wifi_down)"
+    if [ -d "$SYS" ]; then
+      wait_for refcnt_zero 30
+      rmmod "$NAME" 2>>"$LOG" || { say "Could not unload the driver"; [ "$was" = "1" ] && wifi_back_on; exit 4; }
+      sleep 2
+    fi
+    insmod "$STOCK" 2>>"$LOG" || { say "Could not load the stock driver (a reboot restores it)"; exit 5; }
+    sleep 3
+    [ "$was" = "1" ] && wifi_back_on
+    say "Stock driver restored (until the next boot swap; disable it: nh-wlan-driver autoswap off)"
+    ;;
+  status)
+    if [ ! -d "$SYS" ]; then echo "driver: not loaded"
+    elif is_ours; then echo "driver: injection build (monitor + injection)"
+    else echo "driver: stock"; fi
+    [ -d "$SYS" ] && echo "con_mode: $(cat "$SYS/parameters/con_mode" 2>/dev/null) (0 = normal, 4 = monitor)"
+    [ -f "$MODDIR/autoswap" ] && echo "swap on boot: on" || echo "swap on boot: off"
+    [ -f "$MARK" ] && echo "swap in progress or interrupted: $(cat "$MARK")"
+    [ -f "$MODDIR/crashed" ] && echo "last swap was interrupted by a reboot: $(cat "$MODDIR/crashed")"
+    echo "built for: kernel $(cat "$MODDIR/kernel.release" 2>/dev/null)"
+    echo "           vendor $(cat "$MODDIR/vendor.fingerprint" 2>/dev/null)"
+    LOG=/dev/null; guard >/dev/null && echo "compatibility: ok" || echo "compatibility: MISMATCH (no swap until rebuilt)"
+    ;;
+  autoswap)
+    case "$2" in
+      on) rm -f "$MARK" "$MODDIR/crashed"; touch "$MODDIR/autoswap"; echo "swap on boot: on" ;;
+      off) rm -f "$MODDIR/autoswap"; echo "swap on boot: off" ;;
+      *) [ -f "$MODDIR/autoswap" ] && echo "swap on boot: on" || echo "swap on boot: off" ;;
+    esac ;;
+  *) echo "usage: nh-wlan-driver swap|restore|status|autoswap [on|off]"; exit 1 ;;
+esac

@@ -1,0 +1,53 @@
+From 5a6ee0c76328adb0ef0704666a855a628b63a4a0 Mon Sep 17 00:00:00 2001
+From: flesh91 <flesh91@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 11:21:20 +0200
+Subject: [PATCH 5/5] wlan: send CCK radiotap rates outside 2.4 GHz at 6 Mb/s
+ OFDM
+
+---
+ qcacld-3.0/core/wma/src/wma_data.c | 22 ++++++++++++++++++++--
+ 1 file changed, 20 insertions(+), 2 deletions(-)
+
+diff --git a/qcacld-3.0/core/wma/src/wma_data.c b/qcacld-3.0/core/wma/src/wma_data.c
+index 77bbef9..3eedd8d 100644
+--- a/qcacld-3.0/core/wma/src/wma_data.c
++++ b/qcacld-3.0/core/wma/src/wma_data.c
+@@ -644,6 +644,7 @@ wma_injection_send(tp_wma_handle wma, qdf_nbuf_t nbuf,
+ 	struct wmi_mgmt_params params = {0};
+ 	struct cdp_tx_exception_metadata tx_exc = {0};
+ 	struct wma_injection_helper_snapshot helper;
++	struct cdp_tx_injection_params band_params;
+ 	struct wma_injection_slot *slot;
+ 	ol_txrx_soc_handle soc;
+ 	qdf_nbuf_t unsent;
+@@ -663,8 +664,25 @@ wma_injection_send(tp_wma_handle wma, qdf_nbuf_t nbuf,
+ 		return QDF_STATUS_E_INVAL;
+ 	if (tx_params->rate_valid &&
+ 	    tx_params->preamble == CDP_INJECTION_CCK &&
+-	    (chanfreq < 2400 || chanfreq >= 2500))
+-		return QDF_STATUS_E_INVAL;
++	    (chanfreq < 2400 || chanfreq >= 2500)) {
++		/*
++		 * CCK exists only on 2.4 GHz, yet common tools (aireplay-ng) put
++		 * 1 Mb/s into radiotap on every band and rely on the driver to
++		 * fix it up, as mac80211 does. Send at the band's lowest legal
++		 * rate, 6 Mb/s OFDM, exactly as if radiotap had requested it
++		 * (index 4 of the legacy rate table in hdd_injection_legacy_rate).
++		 * A frame with band/bandwidth metadata but no rate at all makes
++		 * the WCN7750 firmware assert, so the rate must stay explicit.
++		 */
++		band_params = *tx_params;
++		band_params.rate_valid = true;
++		band_params.mcs_mask = BIT(4);
++		band_params.nss_mask = 1;
++		band_params.preamble = CDP_INJECTION_OFDM;
++		band_params.bandwidth_valid = true;
++		band_params.bw_mask = BIT(2);
++		tx_params = &band_params;
++	}
+ 	frame_control = cpu_to_le16(get_unaligned_le16(qdf_nbuf_data(nbuf)));
+ 
+ 	if (!wma_injection_get_helper_snapshot(monitor_vdev_id, chanfreq,
+-- 
+2.47.1
+

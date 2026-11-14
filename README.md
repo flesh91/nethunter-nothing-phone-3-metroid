@@ -2,7 +2,7 @@
 
 *[Українською →](README.uk.md)*
 
-A Magisk / KernelSU module that adds the kernel-level features Kali NetHunter needs to the **Nothing Phone (3)** — **without replacing the kernel**. External USB Wi-Fi (monitor mode + injection), USB Bluetooth, the phone's **built-in** Bluetooth and Wi-Fi monitor mode, USB-serial, USB-net and CAN are delivered as loadable kernel modules plus a few userspace helpers, all built against the stock Google GKI kernel.
+A Magisk / KernelSU module that adds the kernel-level features Kali NetHunter needs to the **Nothing Phone (3)** — **without replacing the kernel**. External USB Wi-Fi (monitor mode + injection), USB Bluetooth, the phone's **built-in** Bluetooth and Wi-Fi monitor mode (plus packet injection on the built-in Wi-Fi through an optional second module), USB-serial, USB-net and CAN are delivered as loadable kernel modules plus a few userspace helpers, all built against the stock Google GKI kernel.
 
 > **Device:** Nothing Phone (3) (codename *Metroid*, platform `sun`)
 > **Firmware this build targets:** Nothing OS C5.0 (`ab15756704`), kernel `6.6.127-android15-8-gf0987337fa35-ab15756704-4k`
@@ -38,7 +38,8 @@ Legend: ✅ verified live on the device · 🟡 built & loads, not exercised wit
 |---|---|---|
 | 62 driver modules load into the stock kernel | ✅ | `loaded=62 failed=0`, no kernel errors, autoloads on boot |
 | Built-in Bluetooth as Linux `hci0` (`nh-bt` + `nh-btbridge`) | ✅ | classic inquiry + LE scan; works under SELinux Enforcing |
-| Built-in Wi-Fi **monitor mode** (`nh-wlan`) | ✅ | capture on 2.4/5 GHz, channel switching; **receive-only, no injection** |
+| Built-in Wi-Fi **monitor mode** (`nh-wlan`) | ✅ | capture on 2.4/5 GHz, channel switching; receive-only with the stock driver |
+| Built-in Wi-Fi **packet injection** (optional `nethunter-wlan-inject` module) | ✅ | the Wi-Fi driver rebuilt, **still no custom kernel**: `aireplay-ng --test` 30/30 on 2.4 and 5 GHz, steady monitor RX — see [wlan-inject](wlan-inject/README.md) |
 | USB Arsenal: HID keyboard+mouse, mass storage, ACM, ECM | ✅ | gadget functions enumerate on a host PC (stock-kernel gadget) |
 | NetHunter 32-bit busybox fix (`nh-fix-nethunter`) | ✅ | 64-bit device needs a 64-bit busybox; applied every boot |
 | NetHunter `su: unknown user root` fix | ✅ | custom commands with `su` now run from NetHunter Terminal |
@@ -68,7 +69,6 @@ External USB Wi-Fi adapters (and with them injection + firmware loading), USB Bl
 
 | Feature | Reason | Workaround |
 |---|---|---|
-| Injection on the **built-in** Wi-Fi | Qualcomm `qca_cld3` monitor mode is receive-only (`aireplay-ng --test`: 0/30) | external USB adapter |
 | PostgreSQL for the Metasploit DB (`CONFIG_SYSVIPC`) | enabling it changes `task_struct` → breaks the KMI and every vendor module | msfconsole without a DB, or DB on another host |
 | CAN ISO-TP / J1939 in-kernel | `can_proto_register` etc. are protected in GKI `can.ko` | userspace `python-can-isotp` / `j1939` over `can_raw` |
 | BNEP (Bluetooth PAN) | `bt_sock_register` outside the KMI | — |
@@ -118,6 +118,18 @@ A marker is written before every `insmod`; if the phone reboots mid-load, module
 
 **4 — Kali NetHunter.** Install **NetHunter Generic ARM64 (Full)** for Magisk from [kali.org](https://www.kali.org/get-kali/#kali-mobile) (there is no Phone (3)-specific image; the generic one is correct), reboot, then set up the Kali chroot in the app. The NetHunter fixes below are applied automatically when this module is installed/booted.
 
+
+**5 — Built-in Wi-Fi injection (optional).** Flash the second module, `nethunter-wlan-inject-metroid-ab15756704-v2.zip` from [Releases](../../releases), the same way and reboot. It replaces the stock Wi-Fi driver **in memory** with a rebuilt one — same driver version, plus monitor-mode fixes and frame injection; the stock file in `vendor_dlkm` is untouched and comes back on any reboot without the module. The first swap is manual, exactly like `nh-kmod load`:
+
+```bash
+adb shell su -c "nh-wlan-driver swap"     # expect: Swap OK ... Swap on boot enabled
+adb shell su -c "nh-wlan monitor 9"       # monitor mode: wlan0 (receive + injection)
+```
+
+It is bound to this exact firmware build (kernel, vendor build and stock driver are checked) and does nothing after a Nothing OS update until the driver is rebuilt. Test results, limits and safety nets: [wlan-inject/README.md](wlan-inject/README.md).
+
+> With the `nethunter-kmods` zip from the v1.0 release, `nh-wlan monitor` still prints `receive only, no injection`. That text is outdated — it is fixed in this tree and ships with the next `nethunter-kmods` build. `nh-wlan-driver status` shows which driver is really loaded.
+
 ---
 
 ## Helper commands
@@ -128,6 +140,7 @@ All are in `/system/bin` after a reboot (run by full path before the first reboo
 |---|---|
 | `nh-kmod load \| unload \| status \| autoload on\|off` | load/unload the driver set, show state |
 | `nh-wlan monitor [chan] \| managed \| channel N \| status` | built-in Wi-Fi monitor mode (defaults to channel 6 — **required**, monitor is dead without a channel) |
+| `nh-wlan-driver swap \| restore \| status \| autoswap on\|off` | (module `nethunter-wlan-inject`) swap the built-in Wi-Fi driver for the injection build, or back to stock |
 | `nh-bt start \| stop \| status \| install-bluebinder` | built-in Bluetooth as `hci0` via the AIDL bridge |
 | `nh-fix-nethunter boot \| cache \| commands \| su \| check` | the NetHunter fixes below |
 
@@ -164,15 +177,19 @@ tools/build-all.sh 15756704 f0987337fa351d7e303b071df533fd4c1c194687
 
 After a Nothing OS update, rerun step 1 with the new `vendor_dlkm`/config and `tools/build-all.sh <new ab> <new sha>`.
 
+The built-in Wi-Fi driver is built separately (it needs Nothing's kernel source, not Google's): [wlan-inject/README.md](wlan-inject/README.md).
+
 ### Layout
 
 ```
 module/nethunter-kmods/   Magisk/KernelSU module: helper scripts (the .ko/firmware are built, not committed)
+module/nethunter-wlan-inject/  second module: swaps the built-in Wi-Fi driver after boot (the .ko is built, not committed)
+wlan-inject/              how that driver is built: upstream delta, stock-parity edits, injection patches, checks
 btbridge/nh-btbridge.c    AIDL Bluetooth HAL ↔ /dev/vhci bridge  (+ build.sh)
 patches/                  5 minimal driver patches, one file each, each explained
 config/                   kernel config fragment: what is added, and what is impossible and why
 oot/                      minstrel_ht module + our glue for the out-of-tree Realtek drivers
-tools/                    build-all.sh, fetch-*.sh, check_gki_access.py (GKI load simulator), kocrc.py
+tools/                    build-all.sh, fetch-*.sh, check_gki_access.py (GKI load simulator), kocrc.py, pack-wlan-inject.sh
 docker/                   clang-18 arm64 build image
 ```
 
@@ -180,13 +197,14 @@ docker/                   clang-18 arm64 build image
 
 ## Uninstall
 
-Magisk → *Modules* → remove `nethunter-kmods` (and NetHunter) → Reboot, then reflash the stock `init_boot.img`. To relock (wipes data, stock firmware only): `fastboot flashing lock`.
+Magisk → *Modules* → remove `nethunter-kmods`, `nethunter-wlan-inject` (and NetHunter) → Reboot, then reflash the stock `init_boot.img`. To relock (wipes data, stock firmware only): `fastboot flashing lock`.
 
 ## Licensing
 
 - Scripts, patches, `nh-btbridge.c` and the minstrel wrapper are **GPL-2.0** (kernel-derived) — see [LICENSE](LICENSE).
 - This repo does **not** contain: Nothing's proprietary partition images, Google's kernel binaries, the device's system libraries, or any firmware blobs. The build fetches these from their sources; `fetch-devlibs.sh` pulls link-time libraries from your own device.
 - Release zips bundle firmware from [linux-firmware](https://gitlab.com/kernel-firmware/linux-firmware) under its respective vendor licenses (see that project's `WHENCE`).
+- `wlan-inject/patches/` modifies Qualcomm's qcacld-3.0 / qca-wifi-host-cmn / fw-api sources and keeps their ISC license; the monitor/injection work is by [Loukious](https://github.com/Loukious/vendor_qcom_opensource_wlan), the version delta comes from CodeLinaro. Origins per file: [wlan-inject/README.md](wlan-inject/README.md#patches).
 - The out-of-tree Wi-Fi drivers are separate projects: [morrownr/8812au-20210820](https://github.com/morrownr/8812au-20210820), [morrownr/8814au](https://github.com/morrownr/8814au), [aircrack-ng/rtl8188eus](https://github.com/aircrack-ng/rtl8188eus).
 
 ## Disclaimer

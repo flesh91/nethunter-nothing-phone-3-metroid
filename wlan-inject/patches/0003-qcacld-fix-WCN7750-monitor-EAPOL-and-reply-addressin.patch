@@ -1,0 +1,1191 @@
+From b414cc4ae56c7354d14e71a0a48a32362b14fca7 Mon Sep 17 00:00:00 2001
+From: Loukious <24696530+Loukious@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 19:57:37 +0100
+Subject: [PATCH 3/5] qcacld: fix WCN7750 monitor EAPOL and reply addressing
+
+Accept validated raw data/EAPOL and control frames, retain radiotap TX
+settings through queued submissions, and avoid Ethernet assumptions in
+the raw datapath.
+
+Give the firmware TX helper the monitor netdev address on MLO layouts
+so replies reach userspace. Drain completions before changing helper
+identity or channel, and expose read-only injection counters.
+
+Preserve this branch's Linux 6.6 unaligned include and queue timestamp
+API. The equivalent implementation passed a known-PIN WPS exchange on
+WCN7750 with Android 6.18; all four changed driver objects also compile
+against Linux 6.6.143 with the sun_gki_wcn7750 profile.
+
+Signed-off-by: Loukious <24696530+Loukious@users.noreply.github.com>
+---
+ qca-wifi-host-cmn/dp/inc/cdp_txrx_injection.h |  55 +++
+ qca-wifi-host-cmn/dp/wifi3.0/be/dp_be_tx.c    |   8 +-
+ qca-wifi-host-cmn/dp/wifi3.0/dp_tx.c          |  93 ++++-
+ qcacld-3.0/core/hdd/src/wlan_hdd_tx_rx.c      | 372 ++++++++++++++----
+ qcacld-3.0/core/wma/inc/wma_api.h             |   8 +-
+ qcacld-3.0/core/wma/src/wma_data.c            | 188 ++++++++-
+ 6 files changed, 601 insertions(+), 123 deletions(-)
+ create mode 100644 qca-wifi-host-cmn/dp/inc/cdp_txrx_injection.h
+
+diff --git a/qca-wifi-host-cmn/dp/inc/cdp_txrx_injection.h b/qca-wifi-host-cmn/dp/inc/cdp_txrx_injection.h
+new file mode 100644
+index 0000000..4e7bff7
+--- /dev/null
++++ b/qca-wifi-host-cmn/dp/inc/cdp_txrx_injection.h
+@@ -0,0 +1,55 @@
++/* SPDX-License-Identifier: ISC */
++/* Per-packet monitor TX settings shared by HDD, WMA and the raw datapath. */
++#ifndef _CDP_TXRX_INJECTION_H_
++#define _CDP_TXRX_INJECTION_H_
++
++#include <qdf_nbuf.h>
++
++#define CDP_TX_INJECTION_DESC_PREFIX 0xf000
++
++enum cdp_tx_injection_preamble {
++	CDP_INJECTION_OFDM,
++	CDP_INJECTION_CCK,
++	CDP_INJECTION_HT,
++};
++
++struct cdp_tx_injection_params {
++	uint16_t mcs_mask;
++	uint16_t tx_flags;
++	uint16_t chanfreq;
++	/* Owning netdev address, independent of the injected frame's transmitter. */
++	uint8_t interface_mac[QDF_MAC_ADDR_SIZE];
++	uint8_t nss_mask;
++	uint8_t preamble;
++	/* HTT bandwidth bitmap: bit 2 = 20 MHz, bit 3 = 40 MHz. */
++	uint8_t bw_mask;
++	/* HTT guard interval: 0 = 0.4 us, 1 = 0.8 us. */
++	uint8_t guard_interval;
++	/* Total attempts, including the initial transmission (1..15). */
++	uint8_t retries;
++	uint8_t tid;
++	bool rate_valid;
++	bool bandwidth_valid;
++	bool gi_valid;
++	bool retries_valid;
++	bool no_ack;
++	bool is_data;
++	bool is_eapol;
++};
++
++static inline bool cdp_nbuf_is_injection(qdf_nbuf_t nbuf)
++{
++#ifdef FEATURE_FRAME_INJECTION_SUPPORT
++	return (QDF_NBUF_CB_MGMT_TXRX_DESC_ID(nbuf) &
++		CDP_TX_INJECTION_DESC_PREFIX) == CDP_TX_INJECTION_DESC_PREFIX;
++#else
++	return false;
++#endif
++}
++
++#ifdef FEATURE_FRAME_INJECTION_SUPPORT
++bool wma_injection_get_tx_params(qdf_nbuf_t nbuf,
++				struct cdp_tx_injection_params *params);
++#endif
++
++#endif /* _CDP_TXRX_INJECTION_H_ */
+diff --git a/qca-wifi-host-cmn/dp/wifi3.0/be/dp_be_tx.c b/qca-wifi-host-cmn/dp/wifi3.0/be/dp_be_tx.c
+index 7937cbd..1072dc7 100644
+--- a/qca-wifi-host-cmn/dp/wifi3.0/be/dp_be_tx.c
++++ b/qca-wifi-host-cmn/dp/wifi3.0/be/dp_be_tx.c
+@@ -1770,13 +1770,15 @@ dp_tx_hw_enqueue_be(struct dp_soc *soc, struct dp_vdev *vdev,
+ 	}
+ 
+ 	tx_desc->flags |= DP_TX_DESC_FLAG_QUEUED_TX;
+-	dp_vdev_peer_stats_update_protocol_cnt_tx(vdev, tx_desc->nbuf);
++	if (tx_desc->tx_encap_type != htt_cmn_pkt_type_raw)
++		dp_vdev_peer_stats_update_protocol_cnt_tx(vdev, tx_desc->nbuf);
+ 
+ 	/* Sync cached descriptor with HW */
+ 	hal_tx_desc_sync(hal_tx_desc_cached, hal_tx_desc, num_desc_bytes);
+ 
+-	dp_tx_update_proto_stats(vdev, tx_desc->nbuf, ring_id,
+-				 TX_ENQUEUE_HW);
++	if (tx_desc->tx_encap_type != htt_cmn_pkt_type_raw)
++		dp_tx_update_proto_stats(vdev, tx_desc->nbuf, ring_id,
++					 TX_ENQUEUE_HW);
+ 
+ 	coalesce = dp_tx_attempt_coalescing(soc, vdev, tx_desc, tid,
+ 					    msdu_info, ring_id);
+diff --git a/qca-wifi-host-cmn/dp/wifi3.0/dp_tx.c b/qca-wifi-host-cmn/dp/wifi3.0/dp_tx.c
+index 61684cf..9930728 100644
+--- a/qca-wifi-host-cmn/dp/wifi3.0/dp_tx.c
++++ b/qca-wifi-host-cmn/dp/wifi3.0/dp_tx.c
+@@ -27,6 +27,7 @@
+ #include "hal_tx.h"
+ #include "qdf_mem.h"
+ #include "qdf_nbuf.h"
++#include "cdp_txrx_injection.h"
+ #include "qdf_net_types.h"
+ #include "qdf_module.h"
+ #include <wlan_cfg.h>
+@@ -61,14 +62,6 @@
+ #endif
+ 
+ #ifdef FEATURE_FRAME_INJECTION_SUPPORT
+-#define DP_TX_INJECTION_DESC_PREFIX 0xf000
+-
+-static inline bool dp_tx_is_injection_nbuf(qdf_nbuf_t nbuf)
+-{
+-	return (QDF_NBUF_CB_MGMT_TXRX_DESC_ID(nbuf) &
+-		DP_TX_INJECTION_DESC_PREFIX) == DP_TX_INJECTION_DESC_PREFIX;
+-}
+-
+ extern bool wma_injection_dp_complete(void *wma_context, qdf_nbuf_t nbuf,
+ 				      int32_t status);
+ #endif
+@@ -1161,7 +1154,7 @@ static void dp_tx_trace_pkt(struct dp_soc *soc,
+ 			    qdf_nbuf_t skb, uint16_t msdu_id,
+ 			    uint8_t vdev_id, enum QDF_OPMODE op_mode)
+ {
+-	if (dp_is_tput_high(soc))
++	if (cdp_nbuf_is_injection(skb) || dp_is_tput_high(soc))
+ 		return;
+ 
+ 	QDF_NBUF_CB_TX_PACKET_TRACK(skb) = QDF_NBUF_TX_PKT_DATA_TRACK;
+@@ -2084,6 +2077,10 @@ static void dp_tx_get_tid(struct dp_vdev *vdev, qdf_nbuf_t nbuf,
+ 	qdf_llc_t *llcHdr;
+ 	struct dp_pdev *pdev = (struct dp_pdev *)vdev->pdev;
+ 
++	/* HDD already parsed the variable raw header, including short controls. */
++	if (cdp_nbuf_is_injection(nbuf))
++		return;
++
+ 	DP_TX_TID_OVERRIDE(msdu_info, nbuf);
+ 	if (qdf_likely(vdev->tx_encap_type != htt_cmn_pkt_type_raw)) {
+ 		eh = (qdf_ether_header_t *)nbuf->data;
+@@ -3442,7 +3439,8 @@ dp_tx_send_msdu_single(struct dp_vdev *vdev, qdf_nbuf_t nbuf,
+ 	dp_tx_desc_update_fast_comp_flag(soc, tx_desc,
+ 					 !pdev->enhanced_stats_en);
+ 
+-	dp_tx_desc_update_bcast_flag(soc, tx_desc, nbuf);
++	if (!cdp_nbuf_is_injection(nbuf))
++		dp_tx_desc_update_bcast_flag(soc, tx_desc, nbuf);
+ 
+ 	dp_tx_update_mesh_flags(soc, vdev, tx_desc);
+ 
+@@ -3537,8 +3535,8 @@ qdf_nbuf_t dp_tx_comp_free_buf(struct dp_soc *soc, struct dp_tx_desc_s *desc,
+ 		return NULL;
+ 
+ #ifdef FEATURE_FRAME_INJECTION_SUPPORT
+-	if (dp_tx_is_injection_nbuf(nbuf))
+-		wma_injection_dp_complete(NULL, nbuf, 0);
++	if (cdp_nbuf_is_injection(nbuf))
++		wma_injection_dp_complete(NULL, nbuf, -ENODATA);
+ #endif
+ 
+ 	/* 0 : MSDU buffer, 1 : MLE */
+@@ -3999,6 +3997,61 @@ void dp_tx_add_tx_sniffer_meta_data(struct dp_vdev *vdev,
+ 	msdu_info->is_tx_sniffer = 1;
+ }
+ 
++#ifdef FEATURE_FRAME_INJECTION_SUPPORT
++static bool
++dp_tx_add_injection_metadata(qdf_nbuf_t nbuf,
++			     struct dp_tx_msdu_info_s *msdu_info)
++{
++	struct cdp_tx_injection_params params;
++	struct htt_tx_msdu_desc_ext2_t *meta =
++		(struct htt_tx_msdu_desc_ext2_t *)msdu_info->meta_data;
++
++	if (!wma_injection_get_tx_params(nbuf, &params))
++		return false;
++
++	/* Standalone raw data uses the firmware host-data exception pool. */
++	meta->host_tx_desc_pool = params.is_data;
++	meta->valid_encrypt_type = 1;
++	meta->encrypt_type = 0;
++	meta->valid_chanfreq = 1;
++	meta->chanfreq = params.chanfreq;
++	if (params.rate_valid) {
++		meta->valid_mcs_mask = 1;
++		meta->valid_nss_mask = 1;
++		meta->valid_preamble_type = 1;
++		meta->mcs_mask = params.mcs_mask;
++		meta->nss_mask = params.nss_mask;
++		switch (params.preamble) {
++		case CDP_INJECTION_CCK:
++			meta->pream_type = HTT_TX_MSDU_EXT2_DESC_PREAM_CCK;
++			break;
++		case CDP_INJECTION_HT:
++			meta->pream_type = HTT_TX_MSDU_EXT2_DESC_PREAM_HT;
++			break;
++		default:
++			meta->pream_type = HTT_TX_MSDU_EXT2_DESC_PREAM_OFDM;
++			break;
++		}
++	}
++	if (params.bandwidth_valid) {
++		meta->valid_bw_info = 1;
++		meta->dyn_bw = 0;
++		meta->bw_mask = params.bw_mask;
++	}
++	if (params.gi_valid) {
++		meta->valid_guard_interval = 1;
++		meta->guard_interval = params.guard_interval;
++	}
++	if (params.retries_valid) {
++		meta->valid_retries = 1;
++		meta->retry_limit = params.retries;
++	}
++	/* Per-packet requests must not change the helper peer's rate cache. */
++	meta->update_peer_cache = 0;
++	return true;
++}
++#endif
++
+ #ifdef MESH_MODE_SUPPORT
+ 
+ /**
+@@ -4390,8 +4443,10 @@ dp_tx_send_exception(struct cdp_soc_t *soc_hdl, uint8_t vdev_id,
+ 
+ 	dp_tx_override_flow_pool_id(soc, vdev, &msdu_info);
+ 
+-	dp_tx_update_proto_stats(vdev, nbuf, msdu_info.tx_queue.desc_pool_id,
+-				 TX_EXCEPTION);
++	if (!cdp_nbuf_is_injection(nbuf))
++		dp_tx_update_proto_stats(vdev, nbuf,
++					 msdu_info.tx_queue.desc_pool_id,
++					 TX_EXCEPTION);
+ 
+ 	if (qdf_unlikely(!dp_check_exc_metadata(tx_exc_metadata))) {
+ 		dp_tx_err("Invalid parameters in exception path");
+@@ -4467,6 +4522,11 @@ dp_tx_send_exception(struct cdp_soc_t *soc_hdl, uint8_t vdev_id,
+ 
+ 		dp_tx_add_tx_sniffer_meta_data(vdev, &msdu_info,
+ 					       tx_exc_metadata->ppdu_cookie);
++#ifdef FEATURE_FRAME_INJECTION_SUPPORT
++		if (cdp_nbuf_is_injection(nbuf) &&
++		    !dp_tx_add_injection_metadata(nbuf, &msdu_info))
++			goto fail;
++#endif
+ 	}
+ 
+ 
+@@ -6843,8 +6903,11 @@ void dp_tx_comp_process_tx_status(struct dp_soc *soc,
+ 	}
+ 
+ #ifdef FEATURE_FRAME_INJECTION_SUPPORT
+-	if (dp_tx_is_injection_nbuf(nbuf))
++	if (cdp_nbuf_is_injection(nbuf)) {
+ 		wma_injection_dp_complete(NULL, nbuf, ts->status);
++		/* These are raw 802.11 frames, not Ethernet protocol statistics. */
++		goto out;
++	}
+ #endif
+ 
+ 	length = dp_tx_get_pkt_len(tx_desc);
+diff --git a/qcacld-3.0/core/hdd/src/wlan_hdd_tx_rx.c b/qcacld-3.0/core/hdd/src/wlan_hdd_tx_rx.c
+index d29b075..52b5512 100644
+--- a/qcacld-3.0/core/hdd/src/wlan_hdd_tx_rx.c
++++ b/qcacld-3.0/core/hdd/src/wlan_hdd_tx_rx.c
+@@ -47,6 +47,7 @@
+ #include <cdp_txrx_peer_ops.h>
+ #include <cdp_txrx_flow_ctrl_v2.h>
+ #include <cdp_txrx_misc.h>
++#include <cdp_txrx_injection.h>
+ #include "wlan_hdd_power.h"
+ #include "wlan_hdd_cfg80211.h"
+ #include <wlan_hdd_tsf.h>
+@@ -496,6 +497,7 @@ hdd_drop_tx_packet_on_ftm(struct sk_buff *skb)
+ 
+ #ifdef FEATURE_FRAME_INJECTION_SUPPORT
+ #define HDD_IEEE80211_FCS_LEN 4
++#define HDD_INJECTION_HEADROOM 64
+ 
+ static bool hdd_monitor_tx_dev(struct hdd_adapter *adapter,
+ 			       struct net_device *dev)
+@@ -508,108 +510,291 @@ static bool hdd_monitor_tx_dev(struct hdd_adapter *adapter,
+ 	       dev->type == ARPHRD_IEEE80211_RADIOTAP;
+ }
+ 
+-static bool hdd_radiotap_flags(const struct sk_buff *skb, uint16_t rtap_len,
+-			       uint8_t *flags)
++static int hdd_injection_legacy_rate(uint8_t rate,
++				     struct cdp_tx_injection_params *params)
+ {
+-	const struct ieee80211_radiotap_header *rtap;
+-	uint32_t present;
+-	uint32_t first_present;
+-	unsigned int offset;
+-
+-	*flags = 0;
+-
+-	if (rtap_len < sizeof(*rtap) || rtap_len > skb->len)
+-		return false;
+-
+-	rtap = (const struct ieee80211_radiotap_header *)skb->data;
+-	first_present = le32_to_cpu(rtap->it_present);
+-	present = first_present;
+-	offset = sizeof(*rtap);
+-
+-	while (present & BIT(IEEE80211_RADIOTAP_EXT)) {
+-		if (offset + sizeof(uint32_t) > rtap_len)
+-			return false;
++	static const uint8_t rates[] = {
++		2, 4, 11, 22, 12, 18, 24, 36, 48, 72, 96, 108
++	};
++	unsigned int i;
+ 
+-		present = get_unaligned_le32(skb->data + offset);
+-		offset += sizeof(uint32_t);
++	if (params->rate_valid)
++		return -EINVAL;
++	for (i = 0; i < ARRAY_SIZE(rates); i++) {
++		if (rates[i] != rate)
++			continue;
++		params->rate_valid = true;
++		params->mcs_mask = BIT(i);
++		params->nss_mask = 1;
++		params->preamble = i < 4 ? CDP_INJECTION_CCK :
++					 CDP_INJECTION_OFDM;
++		params->bandwidth_valid = true;
++		params->bw_mask = BIT(2);
++		return 0;
+ 	}
++	return -EOPNOTSUPP;
++}
+ 
+-	if (!(first_present & BIT(IEEE80211_RADIOTAP_FLAGS)))
+-		return true;
++static int hdd_injection_mcs(const uint8_t *mcs,
++			     struct cdp_tx_injection_params *params)
++{
++	uint8_t known = mcs[0], flags = mcs[1];
++	uint8_t bw = flags & IEEE80211_RADIOTAP_MCS_BW_MASK;
+ 
+-	if (first_present & BIT(IEEE80211_RADIOTAP_TSFT)) {
+-		offset = ALIGN(offset, 8);
+-		if (offset + sizeof(uint64_t) > rtap_len)
+-			return false;
+-		offset += sizeof(uint64_t);
++	if (params->rate_valid)
++		return -EINVAL;
++	/* The injection helper advertises one spatial stream. */
++	if (!(known & IEEE80211_RADIOTAP_MCS_HAVE_MCS) || mcs[2] > 7 ||
++	    known & ~(IEEE80211_RADIOTAP_MCS_HAVE_BW |
++		      IEEE80211_RADIOTAP_MCS_HAVE_MCS |
++		      IEEE80211_RADIOTAP_MCS_HAVE_GI |
++		      IEEE80211_RADIOTAP_MCS_HAVE_FMT |
++		      IEEE80211_RADIOTAP_MCS_HAVE_FEC |
++		      IEEE80211_RADIOTAP_MCS_HAVE_STBC))
++		return -EOPNOTSUPP;
++	if (((known & IEEE80211_RADIOTAP_MCS_HAVE_FMT) &&
++	     (flags & IEEE80211_RADIOTAP_MCS_FMT_GF)) ||
++	    ((known & IEEE80211_RADIOTAP_MCS_HAVE_FEC) &&
++	     (flags & IEEE80211_RADIOTAP_MCS_FEC_LDPC)) ||
++	    ((known & IEEE80211_RADIOTAP_MCS_HAVE_STBC) &&
++	     (flags & IEEE80211_RADIOTAP_MCS_STBC_MASK)))
++		return -EOPNOTSUPP;
++	if ((known & IEEE80211_RADIOTAP_MCS_HAVE_BW) &&
++	    bw != IEEE80211_RADIOTAP_MCS_BW_20 &&
++	    bw != IEEE80211_RADIOTAP_MCS_BW_40)
++		return -EOPNOTSUPP;
++
++	params->rate_valid = true;
++	params->mcs_mask = BIT(mcs[2]);
++	params->nss_mask = 1;
++	params->preamble = CDP_INJECTION_HT;
++	if (known & IEEE80211_RADIOTAP_MCS_HAVE_BW) {
++		params->bandwidth_valid = true;
++		params->bw_mask = bw == IEEE80211_RADIOTAP_MCS_BW_40 ?
++				 BIT(3) : BIT(2);
++	}
++	if (known & IEEE80211_RADIOTAP_MCS_HAVE_GI) {
++		params->gi_valid = true;
++		params->guard_interval =
++			!(flags & IEEE80211_RADIOTAP_MCS_SGI);
+ 	}
++	return 0;
++}
+ 
+-	if (offset + sizeof(uint8_t) > rtap_len)
+-		return false;
++static int hdd_injection_radiotap_present(const uint8_t *data, uint16_t len)
++{
++	uint32_t present, allowed;
++	unsigned int offset = 4;
++	bool standard = true;
+ 
+-	*flags = skb->data[offset];
+-	return true;
++	/*
++	 * cfg80211 ends iteration on unknown standard fields. Reject those up
++	 * front so a later requested TX setting cannot be silently skipped.
++	 * Empty extension words and explicit standard namespace resets work.
++	 */
++	do {
++		if (offset + sizeof(uint32_t) > len)
++			return -EINVAL;
++		present = get_unaligned_le32(data + offset);
++		allowed = BIT(IEEE80211_RADIOTAP_EXT) |
++			  BIT(IEEE80211_RADIOTAP_RADIOTAP_NAMESPACE);
++		if (standard)
++			allowed |= GENMASK(IEEE80211_RADIOTAP_VHT, 0) & ~BIT(18);
++		if (present & ~allowed)
++			return -EOPNOTSUPP;
++		standard = present & BIT(IEEE80211_RADIOTAP_RADIOTAP_NAMESPACE);
++		offset += sizeof(uint32_t);
++	} while (present & BIT(IEEE80211_RADIOTAP_EXT));
++	return 0;
+ }
+ 
+-static bool hdd_strip_radiotap(struct sk_buff *skb)
++static int hdd_parse_injection_radiotap(struct sk_buff *skb,
++				       struct cdp_tx_injection_params *params,
++				       uint8_t *flags)
+ {
+-	const struct ieee80211_radiotap_header *rtap;
++	struct ieee80211_radiotap_iterator iter;
++	struct ieee80211_radiotap_header *rtap;
+ 	uint16_t rtap_len;
+-	uint8_t rtap_flags;
++	int ret;
+ 
+ 	if (skb->len < sizeof(*rtap))
+-		return true;
+-
+-	rtap = (const struct ieee80211_radiotap_header *)skb->data;
+-	if (rtap->it_version != PKTHDR_RADIOTAP_VERSION)
+-		return true;
+-
+-	rtap_len = le16_to_cpu(rtap->it_len);
+-	if (rtap_len < sizeof(*rtap) || rtap_len >= skb->len) {
+-		hdd_dp_warn_rl("monitor tx: invalid radiotap len %u skb len %u",
+-			       rtap_len, skb->len);
+-		return false;
++		return -EINVAL;
++	rtap = (struct ieee80211_radiotap_header *)skb->data;
++	rtap_len = get_unaligned_le16(&rtap->it_len);
++	if (rtap_len < sizeof(*rtap) || rtap_len >= skb->len)
++		return -EINVAL;
++	ret = hdd_injection_radiotap_present(skb->data, rtap_len);
++	if (ret)
++		return ret;
++	ret = ieee80211_radiotap_iterator_init(&iter, rtap, rtap_len, NULL);
++	if (ret)
++		return ret;
++
++	while (!(ret = ieee80211_radiotap_iterator_next(&iter))) {
++		if (!iter.is_radiotap_ns)
++			return -EOPNOTSUPP;
++		switch (iter.this_arg_index) {
++		case IEEE80211_RADIOTAP_FLAGS:
++			*flags = *iter.this_arg;
++			if (*flags & (IEEE80211_RADIOTAP_F_WEP |
++				      IEEE80211_RADIOTAP_F_FRAG |
++				      IEEE80211_RADIOTAP_F_SHORTPRE))
++				return -EOPNOTSUPP;
++			break;
++		case IEEE80211_RADIOTAP_RATE:
++			ret = hdd_injection_legacy_rate(*iter.this_arg, params);
++			if (ret)
++				return ret;
++			break;
++		case IEEE80211_RADIOTAP_MCS:
++			ret = hdd_injection_mcs(iter.this_arg, params);
++			if (ret)
++				return ret;
++			break;
++		case IEEE80211_RADIOTAP_CHANNEL:
++			params->chanfreq = get_unaligned_le16(iter.this_arg);
++			if (get_unaligned_le16(iter.this_arg + 2) &
++			    (IEEE80211_CHAN_HALF | IEEE80211_CHAN_QUARTER))
++				return -EOPNOTSUPP;
++			break;
++		case IEEE80211_RADIOTAP_TX_FLAGS:
++			params->tx_flags = get_unaligned_le16(iter.this_arg);
++			if (params->tx_flags &
++			    ~(IEEE80211_RADIOTAP_F_TX_NOACK |
++			      IEEE80211_RADIOTAP_F_TX_NOSEQNO))
++				return -EOPNOTSUPP;
++			break;
++		case IEEE80211_RADIOTAP_DATA_RETRIES:
++			if (*iter.this_arg > 14)
++				return -EOPNOTSUPP;
++			params->retries_valid = true;
++			params->retries = *iter.this_arg + 1;
++			break;
++		case IEEE80211_RADIOTAP_TSFT:
++		case IEEE80211_RADIOTAP_FHSS:
++		case IEEE80211_RADIOTAP_DBM_ANTSIGNAL:
++		case IEEE80211_RADIOTAP_DBM_ANTNOISE:
++		case IEEE80211_RADIOTAP_LOCK_QUALITY:
++		case IEEE80211_RADIOTAP_DB_ANTSIGNAL:
++		case IEEE80211_RADIOTAP_DB_ANTNOISE:
++		case IEEE80211_RADIOTAP_RX_FLAGS:
++			/* Receive-only observations do not select TX parameters. */
++			break;
++		default:
++			return -EOPNOTSUPP;
++		}
+ 	}
+-
+-	if (!hdd_radiotap_flags(skb, rtap_len, &rtap_flags)) {
+-		hdd_dp_warn_rl("monitor tx: failed to parse radiotap header");
+-		return false;
++	if (ret != -ENOENT)
++		return ret;
++	if (params->tx_flags & IEEE80211_RADIOTAP_F_TX_NOACK) {
++		params->no_ack = true;
++		params->retries_valid = true;
++		params->retries = 1;
+ 	}
+ 
+ 	skb_pull(skb, rtap_len);
+-
+-	if (rtap_flags & IEEE80211_RADIOTAP_F_FCS) {
++	if (*flags & IEEE80211_RADIOTAP_F_FCS) {
+ 		if (skb->len <= HDD_IEEE80211_FCS_LEN)
+-			return false;
+-
++			return -EINVAL;
+ 		skb_trim(skb, skb->len - HDD_IEEE80211_FCS_LEN);
+ 	}
+-
+-	return true;
++	return 0;
+ }
+ 
+-static bool hdd_injection_frame_is_valid(const struct sk_buff *skb)
++static int hdd_injection_frame(struct sk_buff *skb, uint8_t rtap_flags,
++			       struct cdp_tx_injection_params *params)
+ {
+-	const struct ieee80211_hdr *hdr;
+-	unsigned int hdr_len;
+-
+-	/* Management frames use the normal three-address, 24-byte header. */
+-	if (skb->len < sizeof(struct ieee80211_hdr_3addr))
+-		return false;
+-
+-	hdr = (const struct ieee80211_hdr *)skb->data;
+-	hdr_len = ieee80211_hdrlen(hdr->frame_control);
++	static const uint8_t eapol_snap[] = {
++		0xaa, 0xaa, 0x03, 0x00, 0x00, 0x00, 0x88, 0x8e
++	};
++	unsigned int hdr_len, pad, min_len;
++	uint16_t fc, ba_control;
++	__le16 frame_control;
++	const uint8_t *payload;
++
++	if (skb->len < sizeof(__le16) || skb->len > IEEE80211_MAX_FRAME_LEN)
++		return -EINVAL;
++	fc = get_unaligned_le16(skb->data);
++	frame_control = cpu_to_le16(fc);
++	if (fc & IEEE80211_FCTL_VERS)
++		return -EINVAL;
++	hdr_len = ieee80211_hdrlen(frame_control);
++	if (skb->len < hdr_len)
++		return -EINVAL;
++	if (!ieee80211_is_mgmt(frame_control) &&
++	    !ieee80211_is_data(frame_control) &&
++	    !ieee80211_is_ctl(frame_control))
++		return -EOPNOTSUPP;
++
++	if (rtap_flags & IEEE80211_RADIOTAP_F_DATAPAD) {
++		pad = ALIGN(hdr_len, 4) - hdr_len;
++		if (skb->len < hdr_len + pad)
++			return -EINVAL;
++		memmove(skb->data + hdr_len, skb->data + hdr_len + pad,
++			skb->len - hdr_len - pad);
++		skb_trim(skb, skb->len - pad);
++	}
+ 
+-	if (hdr_len < sizeof(struct ieee80211_hdr_3addr) || skb->len < hdr_len)
+-		return false;
++	if (ieee80211_is_ctl(frame_control)) {
++		switch (fc & IEEE80211_FCTL_STYPE) {
++		case IEEE80211_STYPE_ACK:
++		case IEEE80211_STYPE_CTS:
++			min_len = 10;
++			break;
++		case IEEE80211_STYPE_RTS:
++		case IEEE80211_STYPE_PSPOLL:
++		case IEEE80211_STYPE_CFEND:
++		case IEEE80211_STYPE_CFENDACK:
++			min_len = 16;
++			break;
++		case IEEE80211_STYPE_BACK_REQ:
++		case IEEE80211_STYPE_BACK:
++			if (skb->len < 20)
++				return -EINVAL;
++			ba_control = get_unaligned_le16(skb->data + 16);
++			/* Multi-TID and extended BA formats need separate parsing. */
++			if (ba_control & 0x0ffa)
++				return -EOPNOTSUPP;
++			min_len = (fc & IEEE80211_FCTL_STYPE) ==
++				   IEEE80211_STYPE_BACK_REQ ? 20 :
++				   (ba_control & BIT(2) ? 28 : 148);
++			break;
++		default:
++			return -EOPNOTSUPP;
++		}
++		return skb->len >= min_len ? 0 : -EINVAL;
++	}
+ 
+-	return ieee80211_is_mgmt(hdr->frame_control);
++	if (ieee80211_is_data_qos(frame_control))
++		params->tid = skb->data[ieee80211_has_a4(frame_control) ? 30 : 24] &
++			      IEEE80211_QOS_CTL_TID_MASK;
++	params->is_data = ieee80211_is_data(frame_control);
++	if (!params->is_data || ieee80211_has_protected(frame_control) ||
++	    ieee80211_has_morefrags(frame_control) ||
++	    (get_unaligned_le16(skb->data +
++			       offsetof(struct ieee80211_hdr, seq_ctrl)) &
++	     IEEE80211_SCTL_FRAG))
++		return 0;
++	payload = skb->data + hdr_len;
++	if (skb->len - hdr_len < sizeof(eapol_snap) ||
++	    memcmp(payload, eapol_snap, sizeof(eapol_snap)))
++		return 0;
++	if (skb->len - hdr_len < sizeof(eapol_snap) + 4 ||
++	    get_unaligned_be16(payload + sizeof(eapol_snap) + 2) >
++	    skb->len - hdr_len - sizeof(eapol_snap) - 4)
++		return -EINVAL;
++	params->is_eapol = true;
++	return 0;
+ }
+ 
+ static void hdd_monitor_mode_tx_inject(struct hdd_adapter *adapter,
+ 				       struct net_device *dev,
+ 				       struct sk_buff *skb)
+ {
++	struct cdp_tx_injection_params params = {0};
++	uint8_t rtap_flags = 0;
++	unsigned int frame_len;
++	int ret;
+ 	QDF_STATUS status;
+ 
+ 	if (!adapter || !adapter->deflink) {
+@@ -617,17 +802,27 @@ static void hdd_monitor_mode_tx_inject(struct hdd_adapter *adapter,
+ 		return;
+ 	}
+ 
+-	if (!hdd_strip_radiotap(skb)) {
+-		kfree_skb(skb);
+-		return;
++	if (skb_is_gso(skb)) {
++		ret = -EOPNOTSUPP;
++		goto invalid;
+ 	}
+-
+-	if (!hdd_injection_frame_is_valid(skb)) {
+-		hdd_dp_warn_rl("monitor tx: dropping invalid injection frame len %u",
+-			       skb->len);
+-		kfree_skb(skb);
+-		return;
++	/* Both radiotap iteration and raw DMA require a writable linear skb. */
++	if (skb_linearize(skb) || skb_cow_head(skb, HDD_INJECTION_HEADROOM))
++		goto drop;
++	if (dev->type == ARPHRD_IEEE80211_RADIOTAP) {
++		ret = hdd_parse_injection_radiotap(skb, &params, &rtap_flags);
++		if (ret)
++			goto invalid;
++	}
++	ret = hdd_injection_frame(skb, rtap_flags, &params);
++	if (ret)
++		goto invalid;
++	if (!is_valid_ether_addr(dev->dev_addr)) {
++		ret = -EINVAL;
++		goto invalid;
+ 	}
++	qdf_mem_copy(params.interface_mac, dev->dev_addr, QDF_MAC_ADDR_SIZE);
++	frame_len = skb->len;
+ 
+ 	/*
+ 	 * Packet sockets leave their own data in skb->cb.  The DP exception
+@@ -635,17 +830,30 @@ static void hdd_monitor_mode_tx_inject(struct hdd_adapter *adapter,
+ 	 * packet-to-firmware bit, so start monitor frames with a clean QDF CB.
+ 	 */
+ 	qdf_nbuf_reset_ctxt((qdf_nbuf_t)skb);
++	skb->ip_summed = CHECKSUM_NONE;
++	skb->protocol = params.is_eapol ? htons(ETH_P_PAE) : 0;
++	skb->mark = 0;
++	skb_reset_mac_header(skb);
+ 
+ 	status = wma_injection_tx((qdf_nbuf_t)skb,
+-				  adapter->deflink->vdev_id);
++				  adapter->deflink->vdev_id, &params);
+ 	if (QDF_IS_STATUS_ERROR(status)) {
+ 		hdd_dp_warn_rl("monitor tx: injection failed vdev %u status %d",
+ 			       adapter->deflink->vdev_id, status);
+-		kfree_skb(skb);
+-		return;
++		goto drop;
+ 	}
+ 
++	DEV_STATS_INC(dev, tx_packets);
++	DEV_STATS_ADD(dev, tx_bytes, frame_len);
+ 	netif_trans_update(dev);
++	return;
++
++invalid:
++	hdd_dp_warn_rl("monitor tx: rejected frame len %u error %d",
++		       skb->len, ret);
++drop:
++	DEV_STATS_INC(dev, tx_dropped);
++	kfree_skb(skb);
+ }
+ #endif /* FEATURE_FRAME_INJECTION_SUPPORT */
+ 
+diff --git a/qcacld-3.0/core/wma/inc/wma_api.h b/qcacld-3.0/core/wma/inc/wma_api.h
+index 80efa3f..b52e044 100644
+--- a/qcacld-3.0/core/wma/inc/wma_api.h
++++ b/qcacld-3.0/core/wma/inc/wma_api.h
+@@ -41,8 +41,11 @@ typedef void *WMA_HANDLE;
+ 
+ #define WMA_MGMT_TX_INJECTION_DESC_ID 0xffff
+ 
++struct cdp_tx_injection_params;
++
+ #ifdef FEATURE_FRAME_INJECTION_SUPPORT
+-QDF_STATUS wma_injection_tx(qdf_nbuf_t nbuf, uint8_t monitor_vdev_id);
++QDF_STATUS wma_injection_tx(qdf_nbuf_t nbuf, uint8_t monitor_vdev_id,
++			    const struct cdp_tx_injection_params *params);
+ QDF_STATUS
+ wma_injection_channel_change_begin(uint8_t monitor_vdev_id,
+ 				   uint32_t chanfreq);
+@@ -54,7 +57,8 @@ bool wma_injection_dp_complete(void *wma_handle, qdf_nbuf_t nbuf,
+ void wma_injection_pre_stop_cleanup(void);
+ #else
+ static inline QDF_STATUS
+-wma_injection_tx(qdf_nbuf_t nbuf, uint8_t monitor_vdev_id)
++wma_injection_tx(qdf_nbuf_t nbuf, uint8_t monitor_vdev_id,
++		 const struct cdp_tx_injection_params *params)
+ {
+ 	return QDF_STATUS_E_NOSUPPORT;
+ }
+diff --git a/qcacld-3.0/core/wma/src/wma_data.c b/qcacld-3.0/core/wma/src/wma_data.c
+index bd2163e..77bbef9 100644
+--- a/qcacld-3.0/core/wma/src/wma_data.c
++++ b/qcacld-3.0/core/wma/src/wma_data.c
+@@ -93,6 +93,9 @@
+ #include <linux/mutex.h>
+ #include <linux/wait.h>
+ #include <linux/workqueue.h>
++#include <linux/ieee80211.h>
++#include <asm/unaligned.h>
++#include <cdp_txrx_injection.h>
+ #include "wlan_reg_services_api.h"
+ #include "wlan_vdev_mlme_api.h"
+ 
+@@ -114,12 +117,52 @@ MODULE_PARM_DESC(injection_dp_inflight_limit,
+ 
+ struct wma_injection_slot {
+ 	qdf_nbuf_t nbuf;
++	struct cdp_tx_injection_params params;
+ 	uint16_t desc_id;
+ 	unsigned long submitted;
+ 	bool direct_dp;
+ 	bool timeout_reported;
+ };
+ 
++/* WMA owns skb->cb while queued; reset it before handing the skb to QDF/DP. */
++struct wma_injection_cb {
++	struct cdp_tx_injection_params params;
++	uint8_t monitor_vdev_id;
++};
++
++static atomic64_t injection_accepted = ATOMIC64_INIT(0);
++static atomic64_t injection_submitted = ATOMIC64_INIT(0);
++static atomic64_t injection_eapol_submitted = ATOMIC64_INIT(0);
++static atomic64_t injection_data_submitted = ATOMIC64_INIT(0);
++static atomic64_t injection_control_submitted = ATOMIC64_INIT(0);
++static atomic64_t injection_send_failed = ATOMIC64_INIT(0);
++static atomic64_t injection_completed = ATOMIC64_INIT(0);
++static atomic64_t injection_completion_failed = ATOMIC64_INIT(0);
++static atomic64_t injection_completion_unknown = ATOMIC64_INIT(0);
++static atomic64_t injection_timed_out = ATOMIC64_INIT(0);
++
++static int wma_injection_stats_get(char *buffer, const struct kernel_param *kp)
++{
++	return scnprintf(buffer, PAGE_SIZE,
++		"accepted=%lld submitted=%lld data=%lld eapol=%lld control=%lld send_failed=%lld completed=%lld completion_failed=%lld completion_unknown=%lld timed_out=%lld\n",
++		atomic64_read(&injection_accepted),
++		atomic64_read(&injection_submitted),
++		atomic64_read(&injection_data_submitted),
++		atomic64_read(&injection_eapol_submitted),
++		atomic64_read(&injection_control_submitted),
++		atomic64_read(&injection_send_failed),
++		atomic64_read(&injection_completed),
++		atomic64_read(&injection_completion_failed),
++		atomic64_read(&injection_completion_unknown),
++		atomic64_read(&injection_timed_out));
++}
++
++static const struct kernel_param_ops wma_injection_stats_ops = {
++	.get = wma_injection_stats_get,
++};
++module_param_cb(injection_stats, &wma_injection_stats_ops, NULL, 0444);
++MODULE_PARM_DESC(injection_stats, "Monitor TX counters; submitted is not an RF receipt");
++
+ struct wma_injection_helper {
+ 	bool created;
+ 	bool wmi_created;
+@@ -133,6 +176,7 @@ struct wma_injection_helper {
+ 	uint8_t monitor_vdev_id;
+ 	uint16_t peer_id;
+ 	uint32_t chanfreq;
++	uint8_t interface_mac[QDF_MAC_ADDR_SIZE];
+ 	uint8_t mac_addr[QDF_MAC_ADDR_SIZE];
+ 	uint8_t peer_addr[QDF_MAC_ADDR_SIZE];
+ };
+@@ -158,6 +202,7 @@ static struct {
+ 
+ static void wma_injection_work(struct work_struct *work);
+ static void wma_injection_reaper(struct work_struct *work);
++static bool wma_injection_wait_for_idle(void);
+ 
+ struct wma_injection_helper_snapshot {
+ 	uint8_t vdev_id;
+@@ -174,13 +219,15 @@ static void wma_injection_queue_work(void)
+ static bool
+ wma_injection_get_helper_snapshot(uint8_t monitor_vdev_id,
+ 				  uint32_t chanfreq,
++				  const uint8_t *interface_mac,
+ 				  struct wma_injection_helper_snapshot *snapshot)
+ {
+ 	struct wma_injection_helper *helper = &wma_injection_ctx.helper;
+ 
+ 	if (!smp_load_acquire(&helper->created) ||
+ 	    READ_ONCE(helper->monitor_vdev_id) != monitor_vdev_id ||
+-	    READ_ONCE(helper->chanfreq) != chanfreq)
++	    READ_ONCE(helper->chanfreq) != chanfreq ||
++	    qdf_mem_cmp(helper->interface_mac, interface_mac, QDF_MAC_ADDR_SIZE))
+ 		return false;
+ 
+ 	snapshot->vdev_id = READ_ONCE(helper->vdev_id);
+@@ -192,6 +239,24 @@ wma_injection_get_helper_snapshot(uint8_t monitor_vdev_id,
+ 	return true;
+ }
+ 
++static void wma_injection_select_mac(uint8_t *helper_mac,
++				     const uint8_t *interface_mac,
++				     const uint8_t *monitor_mac)
++{
++	/*
++	 * On MLO-capable adapters the netdev/MLD address differs from the
++	 * monitor link address. Give the helper the address userspace uses so
++	 * firmware can handle replies to it. Never derive it from a raw TA:
++	 * injected frames may deliberately contain another transmitter.
++	 */
++	qdf_mem_copy(helper_mac, interface_mac, QDF_MAC_ADDR_SIZE);
++	if (!qdf_mem_cmp(interface_mac, monitor_mac, QDF_MAC_ADDR_SIZE)) {
++		/* Preserve the distinct helper on layouts with a shared address. */
++		helper_mac[0] = (helper_mac[0] ^ 0x04) | 0x02;
++		helper_mac[0] &= ~0x01;
++	}
++}
++
+ static QDF_STATUS
+ wma_injection_attach_dp(tp_wma_handle wma,
+ 			struct wma_injection_helper *helper)
+@@ -306,7 +371,7 @@ static void __wma_injection_destroy_helper(tp_wma_handle wma)
+ 
+ static QDF_STATUS
+ __wma_injection_ensure_helper(tp_wma_handle wma, uint8_t monitor_vdev_id,
+-			      uint32_t chanfreq)
++			      uint32_t chanfreq, const uint8_t *interface_mac)
+ {
+ 	struct vdev_create_params create = {0};
+ 	struct vdev_start_params start = {0};
+@@ -319,6 +384,7 @@ __wma_injection_ensure_helper(tp_wma_handle wma, uint8_t monitor_vdev_id,
+ 	struct wlan_channel *monitor_chan;
+ 	ol_txrx_soc_handle soc = cds_get_context(QDF_MODULE_ID_SOC);
+ 	uint8_t *monitor_mac;
++	uint8_t peer_vdev_id;
+ 	uint32_t dfs_region = 0;
+ 	const char *stage = "validate";
+ 	int i, max_id, retries;
+@@ -329,10 +395,15 @@ __wma_injection_ensure_helper(tp_wma_handle wma, uint8_t monitor_vdev_id,
+ 
+ 	if (smp_load_acquire(&helper->created) &&
+ 	    helper->monitor_vdev_id == monitor_vdev_id &&
+-	    helper->chanfreq == chanfreq)
++	    helper->chanfreq == chanfreq &&
++	    !qdf_mem_cmp(helper->interface_mac, interface_mac, QDF_MAC_ADDR_SIZE))
+ 		return QDF_STATUS_SUCCESS;
+-	if (smp_load_acquire(&helper->created))
++	if (smp_load_acquire(&helper->created)) {
++		/* Refill owns helper setup; completions may still use the old peer. */
++		if (!wma_injection_wait_for_idle())
++			return QDF_STATUS_E_BUSY;
+ 		__wma_injection_destroy_helper(wma);
++	}
+ 
+ 	if (!soc || monitor_vdev_id >= wma->max_bssid ||
+ 	    !wma->interfaces[monitor_vdev_id].vdev)
+@@ -360,13 +431,17 @@ __wma_injection_ensure_helper(tp_wma_handle wma, uint8_t monitor_vdev_id,
+ 	helper->vdev_id = i;
+ 	helper->monitor_vdev_id = monitor_vdev_id;
+ 	helper->chanfreq = chanfreq;
+-	qdf_mem_copy(helper->mac_addr, monitor_mac, QDF_MAC_ADDR_SIZE);
+-	/* The monitor address already has the local bit set. */
+-	helper->mac_addr[0] = (helper->mac_addr[0] ^ 0x04) | 0x02;
+-	helper->mac_addr[0] &= ~0x01;
++	qdf_mem_copy(helper->interface_mac, interface_mac, QDF_MAC_ADDR_SIZE);
++	wma_injection_select_mac(helper->mac_addr, interface_mac, monitor_mac);
+ 	qdf_mem_copy(helper->peer_addr, helper->mac_addr, QDF_MAC_ADDR_SIZE);
+ 	helper->peer_id = CDP_INVALID_PEER;
+ 
++	stage = "peer_address";
++	if (wma_objmgr_peer_exist(wma, helper->mac_addr, &peer_vdev_id)) {
++		status = QDF_STATUS_E_BUSY;
++		goto fail;
++	}
++
+ 	stage = "vdev_create";
+ 	create.vdev_id = helper->vdev_id;
+ 	create.type = WMI_VDEV_TYPE_AP;
+@@ -562,7 +637,9 @@ static uint16_t wma_injection_inflight_limit(void)
+ 
+ static QDF_STATUS
+ wma_injection_send(tp_wma_handle wma, qdf_nbuf_t nbuf,
+-		   uint8_t monitor_vdev_id, bool allow_setup)
++		   uint8_t monitor_vdev_id,
++		   const struct cdp_tx_injection_params *tx_params,
++		   bool allow_setup)
+ {
+ 	struct wmi_mgmt_params params = {0};
+ 	struct cdp_tx_exception_metadata tx_exc = {0};
+@@ -573,6 +650,7 @@ wma_injection_send(tp_wma_handle wma, qdf_nbuf_t nbuf,
+ 	bool direct_dp;
+ 	uint32_t chanfreq;
+ 	uint16_t desc_id;
++	__le16 frame_control;
+ 	QDF_STATUS status;
+ 
+ 	if (monitor_vdev_id >= wma->max_bssid ||
+@@ -581,16 +659,26 @@ wma_injection_send(tp_wma_handle wma, qdf_nbuf_t nbuf,
+ 	chanfreq = wma->interfaces[monitor_vdev_id].ch_freq;
+ 	if (!chanfreq)
+ 		return QDF_STATUS_E_INVAL;
++	if (tx_params->chanfreq && tx_params->chanfreq != chanfreq)
++		return QDF_STATUS_E_INVAL;
++	if (tx_params->rate_valid &&
++	    tx_params->preamble == CDP_INJECTION_CCK &&
++	    (chanfreq < 2400 || chanfreq >= 2500))
++		return QDF_STATUS_E_INVAL;
++	frame_control = cpu_to_le16(get_unaligned_le16(qdf_nbuf_data(nbuf)));
+ 
+ 	if (!wma_injection_get_helper_snapshot(monitor_vdev_id, chanfreq,
++					       tx_params->interface_mac,
+ 					       &helper)) {
+ 		if (!allow_setup)
+ 			return QDF_STATUS_E_AGAIN;
+ 		mutex_lock(&wma_injection_ctx.helper_lock);
+ 		status = __wma_injection_ensure_helper(wma, monitor_vdev_id,
+-						       chanfreq);
++						       chanfreq,
++						       tx_params->interface_mac);
+ 		if (!QDF_IS_STATUS_ERROR(status) &&
+ 		    !wma_injection_get_helper_snapshot(monitor_vdev_id, chanfreq,
++						       tx_params->interface_mac,
+ 						       &helper))
+ 			status = QDF_STATUS_E_AGAIN;
+ 		mutex_unlock(&wma_injection_ctx.helper_lock);
+@@ -599,6 +687,13 @@ wma_injection_send(tp_wma_handle wma, qdf_nbuf_t nbuf,
+ 	}
+ 	if (!allow_setup && !helper.direct_dp)
+ 		return QDF_STATUS_E_AGAIN;
++	/* WMI management fallback cannot carry raw data/control or HTT options. */
++	if (!helper.direct_dp &&
++	    (!ieee80211_is_mgmt(frame_control) || tx_params->rate_valid ||
++	     tx_params->bandwidth_valid || tx_params->gi_valid))
++		return QDF_STATUS_E_NOSUPPORT;
++	if (tx_params->no_ack)
++		pr_info_once("wlan injection: NOACK uses one TX attempt; firmware ACK timing and raw sequence preservation require RF validation\n");
+ 
+ 	desc_id = wma_injection_next_desc();
+ 	slot = &wma_injection_ctx.slots[desc_id % WMA_INJECTION_SLOT_COUNT];
+@@ -618,9 +713,12 @@ wma_injection_send(tp_wma_handle wma, qdf_nbuf_t nbuf,
+ 	params.pdata = qdf_nbuf_data(nbuf);
+ 	params.qdf_ctx = cds_get_context(QDF_MODULE_ID_QDF_DEVICE);
+ 	params.tx_params_valid = true;
+-	params.tx_param.retry_limit = 1;
++	params.tx_param.retry_limit = tx_params->retries_valid ?
++				     tx_params->retries : 1;
+ 
+ 	slot->nbuf = nbuf;
++	slot->params = *tx_params;
++	slot->params.chanfreq = chanfreq;
+ 	slot->desc_id = desc_id;
+ 	slot->submitted = jiffies;
+ 	slot->direct_dp = direct_dp;
+@@ -632,7 +730,7 @@ wma_injection_send(tp_wma_handle wma, qdf_nbuf_t nbuf,
+ 		QDF_NBUF_CB_TX_PACKET_TO_FW(nbuf) = 0;
+ 		QDF_NBUF_CB_MGMT_TXRX_DESC_ID(nbuf) = desc_id;
+ 		tx_exc.peer_id = helper.peer_id;
+-		tx_exc.tid = CDP_INVALID_TID;
++		tx_exc.tid = tx_params->tid;
+ 		tx_exc.tx_encap_type = htt_cmn_pkt_type_raw;
+ 		tx_exc.sec_type = CDP_INVALID_SEC_TYPE;
+ 		tx_exc.is_tx_sniffer = 1;
+@@ -656,6 +754,14 @@ wma_injection_send(tp_wma_handle wma, qdf_nbuf_t nbuf,
+ 				wma_injection_ctx.in_flight--;
+ 		}
+ 		spin_unlock_bh(&wma_injection_ctx.lock);
++	} else {
++		atomic64_inc(&injection_submitted);
++		if (tx_params->is_data)
++			atomic64_inc(&injection_data_submitted);
++		if (tx_params->is_eapol)
++			atomic64_inc(&injection_eapol_submitted);
++		if (ieee80211_is_ctl(frame_control))
++			atomic64_inc(&injection_control_submitted);
+ 	}
+ 	return status;
+ }
+@@ -663,6 +769,7 @@ wma_injection_send(tp_wma_handle wma, qdf_nbuf_t nbuf,
+ static void wma_injection_refill(bool allow_setup)
+ {
+ 	qdf_nbuf_t nbuf;
++	struct wma_injection_cb cb;
+ 	uint8_t monitor_vdev_id;
+ 	unsigned long flags;
+ 	bool defer_to_worker = false;
+@@ -688,15 +795,17 @@ static void wma_injection_refill(bool allow_setup)
+ 		nbuf = qdf_nbuf_queue_remove(&wma_injection_ctx.pending);
+ 		spin_unlock_irqrestore(&wma_injection_ctx.lock, flags);
+ 
+-		monitor_vdev_id = qdf_nbuf_get_vdev_ctx(nbuf);
+-		qdf_nbuf_set_vdev_ctx(nbuf, 0);
++		memcpy(&cb, nbuf->cb, sizeof(cb));
++		monitor_vdev_id = cb.monitor_vdev_id;
++		qdf_nbuf_reset_ctxt(nbuf);
+ 		status = wma_injection_send(wma_injection_ctx.wma, nbuf,
+-					    monitor_vdev_id, allow_setup);
++					    monitor_vdev_id, &cb.params,
++					    allow_setup);
+ 		if (QDF_IS_STATUS_ERROR(status)) {
+ 			if (!allow_setup && status == QDF_STATUS_E_AGAIN) {
+-				qdf_nbuf_set_vdev_ctx(nbuf, monitor_vdev_id);
+ 				spin_lock_irqsave(&wma_injection_ctx.lock, flags);
+ 				if (wma_injection_ctx.active) {
++					memcpy(nbuf->cb, &cb, sizeof(cb));
+ 					qdf_nbuf_queue_insert_head(
+ 						&wma_injection_ctx.pending, nbuf);
+ 					nbuf = NULL;
+@@ -710,6 +819,7 @@ static void wma_injection_refill(bool allow_setup)
+ 			}
+ 			wma_err_rl("Injection send failed: status=%d vdev=%u",
+ 				   status, monitor_vdev_id);
++			atomic64_inc(&injection_send_failed);
+ 			qdf_nbuf_free(nbuf);
+ 		}
+ 	}
+@@ -753,6 +863,7 @@ static void wma_injection_reaper(struct work_struct *work)
+ 				slot->timeout_reported = true;
+ 				wma_warn("Direct injection completion timed out: desc=%u",
+ 					 slot->desc_id);
++				atomic64_inc(&injection_timed_out);
+ 			}
+ 			qdf_mem_zero(slot, sizeof(*slot));
+ 			if (wma_injection_ctx.in_flight)
+@@ -761,6 +872,7 @@ static void wma_injection_reaper(struct work_struct *work)
+ 			spin_unlock_bh(&wma_injection_ctx.lock);
+ 			continue;
+ 		}
++		atomic64_inc(&injection_timed_out);
+ 		nbuf = slot->nbuf;
+ 		qdf_mem_zero(slot, sizeof(*slot));
+ 		if (wma_injection_ctx.in_flight)
+@@ -775,8 +887,13 @@ static void wma_injection_reaper(struct work_struct *work)
+ 		schedule_delayed_work(&wma_injection_ctx.reaper, HZ);
+ }
+ 
+-QDF_STATUS wma_injection_tx(qdf_nbuf_t nbuf, uint8_t monitor_vdev_id)
++QDF_STATUS wma_injection_tx(qdf_nbuf_t nbuf, uint8_t monitor_vdev_id,
++			    const struct cdp_tx_injection_params *params)
+ {
++	struct wma_injection_cb cb = {
++		.params = *params,
++		.monitor_vdev_id = monitor_vdev_id,
++	};
+ 	unsigned long flags;
+ 	bool kick_worker;
+ 
+@@ -790,8 +907,10 @@ QDF_STATUS wma_injection_tx(qdf_nbuf_t nbuf, uint8_t monitor_vdev_id)
+ 		spin_unlock_irqrestore(&wma_injection_ctx.lock, flags);
+ 		return QDF_STATUS_E_BUSY;
+ 	}
+-	qdf_nbuf_set_vdev_ctx(nbuf, monitor_vdev_id);
++	BUILD_BUG_ON(sizeof(cb) > sizeof(nbuf->cb));
++	memcpy(nbuf->cb, &cb, sizeof(cb));
+ 	qdf_nbuf_queue_add(&wma_injection_ctx.pending, nbuf);
++	atomic64_inc(&injection_accepted);
+ 	kick_worker = !wma_injection_ctx.paused &&
+ 		      wma_injection_ctx.in_flight <
+ 					wma_injection_inflight_limit();
+@@ -801,6 +920,25 @@ QDF_STATUS wma_injection_tx(qdf_nbuf_t nbuf, uint8_t monitor_vdev_id)
+ 	return QDF_STATUS_SUCCESS;
+ }
+ 
++bool wma_injection_get_tx_params(qdf_nbuf_t nbuf,
++				struct cdp_tx_injection_params *params)
++{
++	uint16_t desc_id = QDF_NBUF_CB_MGMT_TXRX_DESC_ID(nbuf);
++	struct wma_injection_slot *slot;
++	bool found = false;
++
++	if (!cdp_nbuf_is_injection(nbuf))
++		return false;
++	slot = &wma_injection_ctx.slots[desc_id % WMA_INJECTION_SLOT_COUNT];
++	spin_lock_bh(&wma_injection_ctx.lock);
++	if (slot->nbuf == nbuf && slot->desc_id == desc_id && slot->direct_dp) {
++		*params = slot->params;
++		found = true;
++	}
++	spin_unlock_bh(&wma_injection_ctx.lock);
++	return found;
++}
++
+ QDF_STATUS
+ wma_injection_channel_change_begin(uint8_t monitor_vdev_id,
+ 				   uint32_t chanfreq)
+@@ -920,11 +1058,10 @@ bool wma_injection_dp_complete(void *wma_context, qdf_nbuf_t nbuf,
+ 	bool refill = false;
+ 
+ 	(void)wma_context;
+-	(void)status;
+ 
+ 	if ((desc_id & ~WMA_INJECTION_DESC_MASK) != WMA_INJECTION_DESC_BASE)
+ 		return false;
+-	QDF_NBUF_CB_MGMT_TXRX_DESC_ID(nbuf) = 0;
++	/* Keep the marker until DP frees the skb; later stats must still skip it. */
+ 
+ 	slot = &wma_injection_ctx.slots[desc_id % WMA_INJECTION_SLOT_COUNT];
+ 	spin_lock_bh(&wma_injection_ctx.lock);
+@@ -938,6 +1075,13 @@ bool wma_injection_dp_complete(void *wma_context, qdf_nbuf_t nbuf,
+ 
+ 	if (refill && wma_injection_ctx.active)
+ 		wma_injection_refill(false);
++	if (refill) {
++		atomic64_inc(&injection_completed);
++		if (status < 0)
++			atomic64_inc(&injection_completion_unknown);
++		else if (status)
++			atomic64_inc(&injection_completion_failed);
++	}
+ 
+ 	return refill;
+ }
+@@ -1008,8 +1152,10 @@ static void wma_injection_deinit(tp_wma_handle wma)
+ 	__wma_injection_destroy_helper(wma);
+ 	mutex_unlock(&wma_injection_ctx.helper_lock);
+ 	mutex_unlock(&wma_injection_ctx.lifecycle_lock);
+-	while ((nbuf = qdf_nbuf_queue_remove(&wma_injection_ctx.pending)))
++	while ((nbuf = qdf_nbuf_queue_remove(&wma_injection_ctx.pending))) {
++		qdf_nbuf_reset_ctxt(nbuf);
+ 		qdf_nbuf_free(nbuf);
++	}
+ 	for (i = 0; i < WMA_INJECTION_SLOT_COUNT; i++) {
+ 		bool direct_dp;
+ 
+-- 
+2.47.1
+
