@@ -1,0 +1,84 @@
+From: flesh91 <flesh91@users.noreply.github.com>
+Subject: [PATCH] NETHUNTER: sched: keep SysV IPC task state in KABI reserved slots
+
+CONFIG_SYSVIPC (System V IPC: PostgreSQL, so the Metasploit database) adds
+->sysvsem (struct sysv_sem, one pointer) and ->sysvshm (struct sysv_shm, one
+list_head) after ->nameidata in struct task_struct. On the android15-6.6 GKI
+(built with SYSVIPC=n) that shifts every later field and changes the genksyms
+CRC of 5909 of the 9175 vmlinux exports, so no vendor_dlkm/system_dlkm module
+would load.
+
+Put the two fields into the still-free ANDROID_KABI_RESERVE slots 6, 7 and 8
+instead: slot 6 holds sysv_sem via ANDROID_KABI_USE(), slots 7-8 hold the
+16-byte sysv_shm via the same union pattern (with the size/alignment check of
+__ANDROID_KABI_CHECK_SIZE_ALIGN). Under __GENKSYMS__ the struct still shows the
+three original u64 fields, so CRCs are unchanged; in the compiled kernel the
+size and every offset of task_struct stay the same (checked with pahole against
+Google's vmlinux). At this commit ACK uses only slot 1 (dmabuf_info); 2-8 are free.
+The same technique is used by Halium for GKI kernels.
+
+Applies to ACK kernel/common f0987337fa351d7e303b071df533fd4c1c194687
+(android15-6.6, GKI build ab15756704). Out of tree; not for ACK.
+---
+ include/linux/sched.h | 39 +++++++++++++++++++++++++++++++++++----
+ 1 file changed, 35 insertions(+), 4 deletions(-)
+
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -1072,10 +1072,10 @@
+ 
+ 	struct nameidata		*nameidata;
+ 
+-#ifdef CONFIG_SYSVIPC
+-	struct sysv_sem			sysvsem;
+-	struct sysv_shm			sysvshm;
+-#endif
++	/*
++	 * CONFIG_SYSVIPC: ->sysvsem and ->sysvshm live in the reserved KABI
++	 * slots 6-8 near the end of this struct (NetHunter KMI-preserving patch).
++	 */
+ #ifdef CONFIG_DETECT_HUNG_TASK
+ 	unsigned long			last_switch_count;
+ 	unsigned long			last_switch_time;
+@@ -1524,9 +1524,40 @@
+ 	ANDROID_KABI_RESERVE(3);
+ 	ANDROID_KABI_RESERVE(4);
+ 	ANDROID_KABI_RESERVE(5);
++#ifdef CONFIG_SYSVIPC
++	/*
++	 * NetHunter (out of tree, not ACK): System V IPC per-task state is kept
++	 * in reserved KABI slots 6-8 instead of after ->nameidata. A SYSVIPC=y
++	 * kernel then keeps the task_struct layout of the SYSVIPC=n GKI build
++	 * the vendor modules were built against, and genksyms (__GENKSYMS__)
++	 * still sees the three original u64 fields, so export CRCs are unchanged.
++	 *   slot 6    : struct sysv_sem (one pointer)
++	 *   slots 7-8 : struct sysv_shm (one list_head = two pointers)
++	 */
++#ifndef CONFIG_ANDROID_KABI_RESERVE
++#error "SysV IPC in KABI reserved slots needs CONFIG_ANDROID_KABI_RESERVE=y"
++#endif
++	ANDROID_KABI_USE(6, struct sysv_sem sysvsem);
++#ifdef __GENKSYMS__
++	ANDROID_KABI_RESERVE(7);
++	ANDROID_KABI_RESERVE(8);
++#else
++	union {
++		struct sysv_shm			sysvshm;
++		struct {
++			_ANDROID_KABI_RESERVE(7);
++			_ANDROID_KABI_RESERVE(8);
++		};
++		__ANDROID_KABI_CHECK_SIZE_ALIGN(_ANDROID_KABI_RESERVE(7);
++						_ANDROID_KABI_RESERVE(8),
++						struct sysv_shm sysvshm);
++	};
++#endif /* __GENKSYMS__ */
++#else
+ 	ANDROID_KABI_RESERVE(6);
+ 	ANDROID_KABI_RESERVE(7);
+ 	ANDROID_KABI_RESERVE(8);
++#endif /* CONFIG_SYSVIPC */
+ 
+ #ifdef CONFIG_RV
+ 	/*

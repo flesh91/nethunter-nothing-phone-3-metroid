@@ -1,0 +1,233 @@
+#!/system/bin/sh
+# nh-hid on [--app <package>] | off | status
+# USB keyboard + mouse gadget: /dev/hidg0 (keyboard) and /dev/hidg1 (mouse), for NetHunter's HID
+# attacks and apps such as "USB Keyboard" from pelya/android-keyboard-gadget. That project's kernel
+# patch is for kernels older than 3.19; this kernel has the configfs HID function
+# (CONFIG_USB_CONFIGFS_F_HID=y), so only the gadget configuration is needed. The report descriptors
+# are the ones from that patch: a boot keyboard (8-byte reports, LED output report) and a 5-button
+# mouse with X/Y/wheel (4-byte reports).
+#   on                   add both to the current USB configuration; adb, MTP etc. stay. Root-only.
+#   on --app <package>   the same, and that one app may open the two nodes too: owner = the app's
+#                        uid, mode 0600, an SELinux type only these two nodes carry. The kernel
+#                        recreates the nodes on every USB re-bind (cable replug, USB mode change),
+#                        so a small watcher re-applies this until "off", "on" without --app, or reboot.
+#                        Needs Magisk (magiskpolicy) or KernelSU (ksud) for the SELinux rule.
+#   off                  remove them
+#   status               what is set up
+# The USB link re-enumerates on on/off: adb over USB drops for a few seconds. The keyboard and mouse
+# stay through USB mode changes (file transfer, tethering...): the USB HAL only adds and removes its
+# own "functionN" links (checked on the phone: adb -> MTP -> adb).
+MODDIR=/data/adb/modules/nethunter-kmods
+# this very file (also when run from modules_update before the first reboot) for the setsid children
+SELF="$(readlink -f "$0" 2>/dev/null)"; [ -f "$SELF" ] || SELF="$MODDIR/system/bin/nh-hid"
+G=/config/usb_gadget/g1
+C="$G/configs/b.1"
+F="$G/functions"
+KB=hid.nh_keyboard
+MS=hid.nh_mouse
+LOG=/data/adb/nethunter-kmods-hid.log
+APPFLAG=/dev/.nh-hid-app      # tmpfs: gone after reboot, like the live SELinux rule: "<package> <uid> <token> <pid>"
+# Android's toybox, not Magisk's BusyBox (boot scripts run in BusyBox standalone mode)
+TB=/system/bin/toybox
+KBD_DESC=05010906a101050719e029e71500250175019508810295017508810395057501050819012905910295017503910395067508150025650507190029658100c0
+MOUSE_DESC=05010902a1010901a1000509190129051500250195057501810295017503810105010930093109381581257f750895038106c0c0
+SETYPE=nh_hidg_device
+
+say() { echo "$*"; echo "[$(date '+%F %T')] $*" >> "$LOG" 2>/dev/null; }
+udc() { cat "$G/UDC" 2>/dev/null; }
+desc_ok() { [ "$($TB xxd -p -c 256 "$F/$1/report_desc" 2>/dev/null)" = "$2" ]; }
+node() { # /dev node of a function instance, from its "major:minor"
+  m="$(cat "$F/$1/dev" 2>/dev/null)"; [ -n "$m" ] || return 1
+  echo "/dev/hidg${m#*:}"
+}
+linked() { [ -L "$C/$KB" ] && [ -L "$C/$MS" ]; }
+# any function left in the configuration? The kernel does not bind an empty one ("needs at least one function")
+cfg_has_fn() { for l in "$C"/*; do [ -L "$l" ] && return 0; done; return 1; }
+
+# create a HID function instance once; attributes can only be set while it is not linked
+make_fn() { # name protocol report_length descriptor
+  [ -d "$F/$1" ] || mkdir "$F/$1" || { say "cannot create $F/$1 (no configfs HID function?)"; return 1; }
+  desc_ok "$1" "$4" && return 0
+  if [ -L "$C/$1" ]; then say "$1 is linked with another descriptor - run: nh-hid off"; return 1; fi
+  echo 1 > "$F/$1/subclass" && echo "$2" > "$F/$1/protocol" && echo "$3" > "$F/$1/report_length" &&
+    echo -n "$4" | $TB xxd -r -p > "$F/$1/report_desc"
+  desc_ok "$1" "$4" || { say "$1: the report descriptor did not take"; return 1; }
+}
+
+# Change the links with USB unbound, then make sure USB is bound again. Internal (via __relink), in its
+# own session with SIGHUP ignored: started over adb, the adb shell dies with the USB link (mksh sends
+# SIGHUP to its children's PIDs on exit, so setsid alone does not protect them).
+# Android's gadget HAL re-binds USB by itself ~0.5 s after adbd/MTP reopen their FunctionFS endpoints,
+# so the links are changed right after unbinding, and binding is left to the HAL when it does it.
+relink() { # add|del
+  trap '' HUP PIPE
+  U="$(udc)"; [ -n "$U" ] || U="$(ls /sys/class/udc 2>/dev/null | head -1)"
+  [ -n "$U" ] || { echo "no USB device controller"; exit 1; }
+  echo "[$(date '+%F %T')] $1, udc $U"
+  if [ "$1" = add ]; then
+    t=0
+    until linked; do
+      [ $t -lt 3 ] || { echo "could not link: USB was re-bound at once each time"; break; }
+      echo "" > "$G/UDC" 2>/dev/null
+      [ -L "$C/$KB" ] || ln -s "$F/$KB" "$C/$KB"     # EINVAL = re-bound already -> next round
+      [ -L "$C/$MS" ] || ln -s "$F/$MS" "$C/$MS"
+      t=$((t+1))
+    done
+  else
+    rm -f "$C/$KB" "$C/$MS"                          # unlinking from a bound configuration unbinds it
+  fi
+  if ! cfg_has_fn; then                              # e.g. USB data off: nothing else to bind, unbound is right
+    echo "no other USB functions in the configuration - USB stays unbound, as before"
+    echo "UDC now: $(udc); keyboard/mouse linked: no"; return 0
+  fi
+  # bind only while unbound: EBUSY = the HAL bound it already; ENODEV = FunctionFS not reopened yet.
+  # adbd closing its old endpoints may unbind once more, so keep checking for a few seconds.
+  i=0
+  while [ $i -lt 4 ]; do
+    [ -n "$(udc)" ] || echo "$U" > "$G/UDC" 2>/dev/null
+    sleep 1; i=$((i+1))
+  done
+  if [ -z "$(udc)" ]; then                           # only when USB really is unbound
+    echo "binding failed - removing the keyboard/mouse and binding USB again"
+    rm -f "$C/$KB" "$C/$MS"
+    i=0; while [ -z "$(udc)" ] && [ $i -lt 3 ]; do echo "$U" > "$G/UDC" 2>/dev/null; sleep 1; i=$((i+1)); done
+    [ -n "$(udc)" ] || echo "!! USB is not bound - toggle USB debugging or the USB mode, or reboot"
+  fi
+  echo "UDC now: $(udc); keyboard/mouse linked: $(linked && echo yes || echo no)"
+}
+run_relink() {
+  trap '' HUP PIPE      # inherited as ignored by the relink below; the adb shell dying must not kill either
+  $TB setsid -w sh "$SELF" __relink "$1" </dev/null >>"$LOG" 2>&1
+  [ -n "$(udc)" ] || ! cfg_has_fn || { say "USB is not bound - see $LOG"; return 1; }
+}
+
+# the kernel creates the nodes when USB binds, so they may take a moment
+wait_node() { i=0; while [ ! -c "$1" ] && [ $i -lt 8 ]; do sleep 1; i=$((i+1)); done; [ -c "$1" ]; }
+
+# one app: owner = its uid, mode 0600 (DAC keeps out every other app, isolated and SDK-sandbox
+# processes included), plus a dedicated SELinux type that regular and privileged apps may read/write
+# (mlstrustedobject: apps run with their own MLS categories). No ioctl: f_hid has none.
+# Magisk's magiskpolicy (found even when PATH lacks /product/bin, as in NetHunter Terminal) or KernelSU's ksud
+POLICY_RULES="type $SETYPE
+typeattribute $SETYPE { dev_type mlstrustedobject }
+allow $SETYPE { device tmpfs } filesystem associate
+allow { untrusted_app_all priv_app } $SETYPE chr_file { read write open getattr }"
+policy_tool() {
+  for t in "$(command -v magiskpolicy 2>/dev/null)" /debug_ramdisk/magiskpolicy /sbin/magiskpolicy /data/adb/magisk/magiskpolicy; do
+    [ -n "$t" ] && [ -x "$t" ] && { echo "$t"; return 0; }
+  done
+  [ -x /data/adb/ksud ] && { echo /data/adb/ksud; return 0; }
+  return 1
+}
+app_policy() {
+  t="$(policy_tool)" || return 1
+  case "$t" in
+    */ksud) "$t" sepolicy patch "$(echo "$POLICY_RULES" | tr '\n' ';')" ;;
+    *) # magiskpolicy: one statement per argument
+       old_ifs="$IFS"; IFS='
+'
+       set -- $POLICY_RULES; IFS="$old_ifs"
+       "$t" --live "$@" ;;
+  esac >/dev/null 2>>"$LOG"
+}
+grant() { # uid node...
+  u="$1"; shift
+  for n in "$@"; do
+    [ -c "$n" ] || continue
+    [ "$($TB stat -c '%u %a %C' "$n" 2>/dev/null)" = "$u 600 u:object_r:$SETYPE:s0" ] ||
+      { chown "$u:$u" "$n" && chmod 600 "$n" && chcon "u:object_r:$SETYPE:s0" "$n"; }
+  done
+}
+appwatch() { # internal: uid token keyboard-node mouse-node; runs while the flag carries this token
+  trap '' HUP PIPE
+  u="$1"; tok="$2"; k="$3"; m="$4"
+  while [ -f "$APPFLAG" ] && read -r p fu ft fp < "$APPFLAG" && [ "$ft" = "$tok" ]; do
+    # a node the kernel recreated on a re-bind belongs to root again: only then fix it (builtin test, no fork)
+    { [ -O "$k" ] || [ -O "$m" ]; } && grant "$u" "$k" "$m"
+    sleep 1
+  done
+}
+stop_watcher() {
+  [ -f "$APPFLAG" ] || return 0
+  read -r p u t w < "$APPFLAG"
+  rm -f "$APPFLAG"      # the watcher checks the flag every second and exits; no kill (no PID-reuse risk)
+  [ -n "$w" ] || return 0
+  i=0; while [ -d "/proc/$w" ] && [ $i -lt 30 ]; do sleep 0.1; i=$((i+1)); done
+}
+revoke_app() {
+  stop_watcher          # first, so a watcher in mid-iteration cannot grant again after the reset
+  for f in "$KB" "$MS"; do
+    n="$(node "$f")" && [ -c "$n" ] || continue
+    chown 0:0 "$n"; chmod 600 "$n"; chcon u:object_r:device:s0 "$n"
+  done
+}
+app_uid() { # package -> uid of a regular app, checked before USB is touched
+  uid="$($TB stat -c %u "/data/data/$1" 2>/dev/null)"
+  case "$uid" in ''|*[!0-9]*) say "no such app: $1"; return 1 ;; esac
+  [ "$uid" -ge 10000 ] && [ "$uid" -lt 20000 ] || { say "$1 is not a regular app (uid $uid)"; return 1; }
+  echo "$uid"
+}
+app_access() { # package uid keyboard-node mouse-node
+  app_policy || { say "the SELinux rule could not be loaded (see $LOG) - the app gets no access"; return 1; }
+  stop_watcher
+  tok="$$.$(date +%s)"
+  echo "$1 $2 $tok" > "$APPFLAG"                       # before the watcher starts: it only reads it
+  grant "$2" "$3" "$4"
+  $TB setsid sh "$SELF" __appwatch "$2" "$tok" "$3" "$4" </dev/null >>"$LOG" 2>&1 &
+  echo "$1 $2 $tok $!" > "$APPFLAG"                    # toybox setsid does not fork here: $! is the watcher
+  say "$1 (uid $2) may open the keyboard and mouse - until nh-hid off, nh-hid on without --app, or reboot"
+}
+
+on() { # [--app <package>]
+  case "$1" in
+    "") [ -z "$2" ] || { echo "usage: nh-hid on [--app <package>]"; exit 1; } ;;
+    --app) [ -n "$2" ] && [ -z "$3" ] || { echo "usage: nh-hid on [--app <package>]"; exit 1; }
+           uid="$(app_uid "$2")" || exit 1
+           policy_tool >/dev/null || { say "--app needs Magisk (magiskpolicy) or KernelSU (ksud)"; exit 1; } ;;
+    *) echo "usage: nh-hid on [--app <package>]"; exit 1 ;;
+  esac
+  [ -d "$C" ] || { say "no USB gadget configuration at $C"; exit 1; }
+  make_fn "$KB" 1 8 "$KBD_DESC" && make_fn "$MS" 2 4 "$MOUSE_DESC" || exit 1
+  if linked && [ -n "$(udc)" ]; then say "keyboard and mouse are already in the USB configuration"
+  else run_relink add || exit 1; fi
+  linked || { say "could not add them to the USB configuration - see $LOG"; exit 1; }
+  k="$(node "$KB")"; m="$(node "$MS")"
+  wait_node "$k" && wait_node "$m" || { say "device nodes $k $m did not appear - is USB bound? (nh-hid status)"; exit 1; }
+  say "keyboard: $k   mouse: $m"
+  [ "$k" = /dev/hidg0 ] && [ "$m" = /dev/hidg1 ] ||
+    say "note: other HID functions exist (status) - tools that expect /dev/hidg0 and /dev/hidg1 need these paths"
+  if [ "$1" = --app ]; then app_access "$2" "$uid" "$k" "$m"
+  elif [ -f "$APPFLAG" ]; then revoke_app; say "app access revoked"; fi
+}
+
+off() {
+  revoke_app
+  if [ -L "$C/$KB" ] || [ -L "$C/$MS" ]; then run_relink del; fi
+  if [ -L "$C/$KB" ] || [ -L "$C/$MS" ]; then say "could not remove them from the USB configuration - see $LOG"; exit 1; fi
+  for f in "$KB" "$MS"; do [ -d "$F/$f" ] && rmdir "$F/$f" 2>>"$LOG"; done
+  if [ -d "$F/$KB" ] || [ -d "$F/$MS" ]; then say "keyboard/mouse unlinked, but their functions are still there - see $LOG"
+  else say "keyboard and mouse removed"; fi
+}
+
+status() {
+  echo "USB controller: $(udc)   usb state: $(getprop sys.usb.state)"
+  for f in "$KB" "$MS"; do
+    if [ ! -d "$F/$f" ]; then echo "  $f: -"; continue; fi
+    n="$(node "$f")"
+    [ -L "$C/$f" ] && l="in the USB configuration" || l="not linked"
+    [ -c "$n" ] && a="$($TB stat -c 'mode %a, uid %u, %C' "$n")" || a="no node (USB not bound?)"
+    echo "  $f: $n, $l, $a"
+  done
+  if [ -f "$APPFLAG" ]; then read -r p u t w < "$APPFLAG"; echo "  app access: $p (uid $u), watcher pid $w"; fi
+  others="$(ls "$F" | grep '^hid\.' | grep -vxE "$KB|$MS" | tr '\n' ' ')"
+  [ -z "$others" ] || echo "  other HID functions: $others"
+}
+
+case "$1" in
+  on) shift; on "$@" ;;
+  off) off ;;
+  status) status ;;
+  __relink) relink "$2" ;;
+  __appwatch) appwatch "$2" "$3" "$4" "$5" ;;
+  *) echo "usage: nh-hid on [--app <package>] | off | status"; exit 1 ;;
+esac

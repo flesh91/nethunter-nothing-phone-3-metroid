@@ -98,7 +98,12 @@ parent() {
 
 load() {
   if [ ! -f "$ORDER" ]; then say "NetHunter-kernel features are not included in this build of the module"; return 0; fi
-  if ! ours_kernel; then say "Not the NetHunter kernel - its extra features stay idle"; return 0; fi
+  if ! ours_kernel; then
+    if grep -q '(nethunter@metroid)' /proc/version; then
+      say "Another NetHunter kernel build - extra features stay idle (module and nethunter-boot.img must come from one release)"
+    else say "Not the NetHunter kernel - its extra features stay idle"; fi
+    return 0
+  fi
   fw_add
   awk '{print $3}' "$ORDER" | tr , '\n' | grep -qx mac80211 && rate_ctl
   ok=""; bad=""; failed=" "
@@ -148,6 +153,8 @@ unload() {
 status() {
   if [ ! -f "$ORDER" ]; then echo "NetHunter-kernel features: not included in this build of the module"; return; fi
   if ours_kernel; then echo "kernel: NetHunter build - extra features available"
+  elif grep -q '(nethunter@metroid)' /proc/version; then
+    echo "kernel: another NetHunter build - extra features idle (module and nethunter-boot.img must come from one release)"
   else echo "kernel: not the NetHunter build (stock?) - extra features idle"; fi
   n=0; l=0
   while read -r f kind deps; do

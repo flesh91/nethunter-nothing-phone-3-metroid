@@ -35,7 +35,8 @@ Google публікує артефакти цієї збірки на ci.android
 ## Які фічі додає ядро
 
 Усе з офіційних сторінок «Configuring the Kernel» Kali NetHunter, чого бракує стоку і що можна додати,
-не змінюючи KMI — усе модулями (`=m`), тож vmlinux лишається ідентичним збірці Google.
+не змінюючи KMI — модулями (`=m`), а System V IPC — вбудовано з невеликим патчем (див. нижче), тож
+KMI лишається ідентичним збірці Google: усі 9175 стокових експортів з тими самими CRC (плюс нові з `extra-exports.txt`).
 
 | Фіча | Конфіг | Перевірено |
 |---|---|---|
@@ -49,6 +50,7 @@ Google публікує артефакти цієї збірки на ci.android
 | NFS клієнт і сервер | `NFS_FS` (`V2/V3/V4`), `NFSD` (`V4`) → sunrpc, lockd, grace, rpcsec_gss_krb5, dns_resolver | ✅ `nfs`/`nfs4`/`nfsd` у `/proc/filesystems` (монтування — ще ні) |
 | Діагностика netlink-сокетів | `NETLINK_DIAG` | ✅ `ss -a -A netlink` |
 | Примусове вивантаження модулів | `MODULE_FORCE_UNLOAD=y` | ✅ у конфігу запущеного ядра |
+| System V IPC (PostgreSQL → база Metasploit) | `SYSVIPC=y` (+ `SYSVIPC_SYSCTL`, `SYSVIPC_COMPAT`, `IPC_NS`) і патч [`patches/0001-…`](patches/) | ✅ `ipcmk`, PostgreSQL 18, `msfconsole` + `db_connect`; ~97 тис. процесів із `SEM_UNDO` і shm |
 | Старі USB Wi-Fi AR9170 / ZD1211 / Broadcom 4320 | драйвери — модулем з конвеєра (`config/nh-kernel-only.list`), ядро лишає їм експорти з [`extra-exports.txt`](extra-exports.txt) | 🟡 вантажаться |
 
 Фрагмент — [`nethunter.config`](nethunter.config). Вбудована Wi-Fi-інжекція лишається в модулі.
@@ -64,8 +66,27 @@ Google публікує артефакти цієї збірки на ci.android
 - **USB Wi-Fi, що лишились** — модулем, не в ядрі, бо `cfg80211`/`mac80211` на цьому телефоні вендорські (Qualcomm):
   zd1201, rtl8192cu, ath6kl працюють і на стоковому ядрі; carl9170, zd1211rw, rndis_wlan — лише з цим ядром
   (їм потрібні `usb_poison_anchored_urbs`, `usb_wait_anchor_empty_timeout`, `usbnet_pause_rx` та ін., див. [`extra-exports.txt`](extra-exports.txt));
-- **неможливо**: `SYSVIPC` (змінює `task_struct` → ламає KMI);
+- **з патчем**: `SYSVIPC` — просте `=y` змінює `task_struct` і ламає KMI, тому поля кладуться в запасні слоти (див. нижче);
 - **свідомо ні**: DVB/SDR-драйвери ядра (userspace librtlsdr/hackrf/airspy уже працює, а драйвер ядра забирав би донгли), CAN-контролери SoC/SPI/PCI (такого заліза в телефоні немає), HLCAN (поза деревом ядра), `USB_SERIAL_CONSOLE`/`GENERIC` (потребують перезбірки гуглівського usbserial), формати образу й `LOCALVERSION` (до GKI не застосовні).
+
+### System V IPC без зміни KMI
+
+`CONFIG_SYSVIPC` додає в `struct task_struct` поля `sysvsem` (вказівник) і `sysvshm` (`list_head`) одразу після
+`nameidata`. Усе, що далі, зсувається на 24 байти, і genksyms дає інший CRC для 5909 з 9175 експортів vmlinux:
+не завантажився б жоден із 748 модулів `vendor_dlkm`/`system_dlkm`/`vendor_boot` (виміряно).
+
+Патч [`patches/0001-sched-keep-SysV-IPC-state-in-KABI-reserved-slots.patch`](patches/) кладе ці поля в запасні слоти
+`ANDROID_KABI_RESERVE(6)` і `(7, 8)`, які Google лишає в `task_struct` саме для таких доповнень (у цьому коміті
+зайнятий лише слот 1, `dmabuf_info`). Для genksyms (`__GENKSYMS__`) структура лишається тією самою, тож CRC не змінюються; у
+зібраному ядрі розмір і всі зміщення `task_struct` збігаються з vmlinux Google (pahole по всіх 10698 типах). Той
+самий прийом використовує Halium для GKI-ядер. Звернень модулів Qualcomm і Google до
+слотів 6-8 через `current` немає (сканування 748 модулів); звернення через інші вказівники на `task_struct` статично
+до кінця не відсіяні. Модуль, який писав би туди, зіпсував би стан SysV і ламав би ядро при завершенні процесів; у
+тесті ~100 тис. процесів пройшли без помилок.
+
+При переході на новіший коміт ACK треба перевірити, чи Google не зайняв слоти 6-8 (`ANDROID_KABI_USE` у
+`include/linux/sched.h`): тоді патч не накладеться, і поля треба перенести в інші вільні слоти.
+`android-base.config` формально вимагає `SYSVIPC` вимкненим (тест VTS), але на завантаження Android це не впливає.
 
 ### Чому вимкнено `CONFIG_MODULE_SIG_PROTECT`
 
@@ -99,8 +120,10 @@ docker run --rm -v nh-gki-src:/src -v nh-gki-out:/out \
 ```
 
 [`build-gki.sh`](build-gki.sh) стадіями:
-- **config** — стоковий конфіг + фрагмент + `SIG_PROTECT` off; `extra-exports.txt` дописується до `abi_symbollist.raw`; друкує **кожну** відмінність від стоку
-  (зараз 42: опції фрагмента, їхні підопції й автозалежності — sunrpc/lockd/grace/`NET_HANDSHAKE`…, `SIG_PROTECT`)
+- **config** — накладає [`patches/*.patch`](patches/) на чисте дерево (`/src` має бути або точним комітом ACK, або рівно
+  цим комітом + цими патчами — інакше збірка зупиняється); стоковий конфіг + фрагмент + `SIG_PROTECT` off;
+  `extra-exports.txt` дописується до `abi_symbollist.raw`; друкує **кожну** відмінність від стоку
+  (зараз 46: опції фрагмента, їхні підопції й автозалежності — sunrpc/lockd/grace/`NET_HANDSHAKE`…, `SYSVIPC_*`/`IPC_NS`, `SIG_PROTECT`)
   і звіряє рядок версії. Рядок відтворено як у Kleaf: файл `localversion` в O= + `GIT_DIR` вимкнено
   для `make` (тоді `scripts/setlocalversion` не додає `-g<sha>`/`-dirty`).
 - **build** — `Image` + модулі (нативний arm64, clang 18.1.3; стоковий r510928 — те саме покоління LLVM 18).
@@ -156,7 +179,17 @@ docker run --rm -v nh-gki-src:/src -v nh-gki-out:/out \
       тож гуглівські модулі повертаються через `/system/bin/toolbox modprobe`.
 - [ ] Наживо з залізом: RNDIS/QMI/MBIM/DM9601/MCS7830 (USB-модем/Ethernet), BNEP (BT PAN), BPA10x, Kvaser/EMS/ESD/UCAN,
       PN533, RNDIS-гаджет, USB Wi-Fi carl9170/zd1211rw/rndis_wlan; NFS — монтування (потрібні `nfs-common`/`nfs-kernel-server` у Kali).
-- [ ] Постійна прошивка `boot` (тестували лише `fastboot boot`).
+- [x] **Постійна прошивка** (14.11.2026): `fastboot flash boot_b` (поточний слот), вміст розділу = образ побайтово,
+      `verifiedbootstate` orange. Старт із розділу і після звичайного `reboot`: 615 модулів, 0 стокових відсутні,
+      модуль 69/69 + 36/36, Wi-Fi injection, LTE на обох SIM. Відкат — стоковий `boot.img` у той самий слот.
+- [x] **System V IPC (модуль v8, 15.11.2026)** — `SYSVIPC=y` + патч [`patches/0001-…`](patches/) (поля SysV у запасних
+      KABI-слотах `task_struct`). KMI IDENTICAL (9175/9175), `vmlinux.symvers` побайтово = збірка 14.11, розкладка всіх
+      10678 структур = vmlinux Google; без патча — 5909 розбіжностей CRC. Наживо (`fastboot boot`): 615 модулів, 0 відсутніх,
+      модуль v8 сам завантажив 36/36, Wi-Fi injection, LTE на обох SIM, камера; у chroot `Seccomp: 0`, `ipcmk`, `SEM_UNDO`,
+      PostgreSQL 18.6, `msfconsole` + `db_connect`; навантаження ~97 тис. процесів без помилок.
+      Прошито постійно (`fastboot flash boot_b`, sha256 `333f4e9e…`, вміст розділу = образ побайтово): старт із розділу і
+      після звичайного `reboot` — 615 модулів, 0 відсутніх, 36/36, SysV, Wi-Fi injection, LTE. Попередній образ (14.11):
+      `kernel/out-gki/nethunter-boot.v7-20261114.img`.
 - [ ] Апстрім у NetHunter.
 
 ### Знахідка тесту: обрізані експорти в модулях Google

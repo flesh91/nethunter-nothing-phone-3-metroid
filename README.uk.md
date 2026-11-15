@@ -27,7 +27,7 @@
 
 Ключова знахідка: `cfg80211`/`mac80211` на пристрої — Qualcomm, а не Google. Заголовки збігаються з ACK, але конфіг інший: `CONFIG_NL80211_TESTMODE=y` (інакше CRC `wiphy_new_nm`/`ieee80211_alloc_hw_nm` не збігаються і драйвери не вантажаться) і `CONFIG_MAC80211_RC_MINSTREL` **вимкнено** (у mac80211 Qualcomm немає rate control, тож USB-адаптери не стартують). Тому `minstrel_ht` зібрано окремим модулем і зроблено типовим при завантаженні. Джерело для звірки: [NothingOSS/android_kernel_msm-6.6_nothing_sm8735](https://github.com/NothingOSS/android_kernel_msm-6.6_nothing_sm8735), гілка `sm8735/b/mr`, `arch/arm64/configs/vendor/sun_perf.config`.
 
-**Необов'язковий варіант B — власне ядро NetHunter.** Те, чого модуль на стоковому ядрі дати не може (CAN ISO-TP/J1939, BNEP, USB RNDIS/QMI/MBIM, RNDIS-гаджет, старі USB Wi-Fi AR9170/ZD1211/Broadcom 4320), дає власне boot-ядро: те саме ядро Google, зібране з того самого коміту ACK і стокового конфігу, з KMI, ідентичним збірці Google. Модуль лишається тим самим і сам вмикає ці функції, коли працює це ядро — див. [Варіант B](#варіант-b-власне-ядро-nethunter-необовязково).
+**Необов'язковий варіант B — власне ядро NetHunter.** Те, чого модуль на стоковому ядрі дати не може (System V IPC для PostgreSQL і бази Metasploit, CAN ISO-TP/J1939, BNEP, USB RNDIS/QMI/MBIM, RNDIS-гаджет, старі USB Wi-Fi AR9170/ZD1211/Broadcom 4320), дає власне boot-ядро: те саме ядро Google, зібране з того самого коміту ACK і стокового конфігу, з KMI, ідентичним збірці Google. Модуль лишається тим самим і сам вмикає ці функції, коли працює це ядро — див. [Варіант B](#варіант-b-власне-ядро-nethunter-необовязково).
 
 ---
 
@@ -44,6 +44,7 @@
 | **Monitor mode** вбудованого Wi-Fi (`nh-wlan`) | ✅ | захоплення на 2.4/5 ГГц, перемикання каналів; зі стоковим драйвером лише приймання |
 | **Packet injection** на вбудованому Wi-Fi (`nh-wlan-driver`) | ✅ | перезібраний драйвер Wi-Fi, що підміняється автоматично після старту, **ядро так само стокове**: `aireplay-ng --test` 30/30 на 2.4 і 5 ГГц, deauth і захоплення WPA2 handshake на 5 ГГц, рівне приймання в моніторі — див. [wlan-inject](wlan-inject/README.uk.md) |
 | Зовнішній USB Wi-Fi: Atheros AR9271 (перевірено на TP-Link TL-WN722N **v1**) | ✅ | `ath9k_htc` вантажиться при підключенні, прошивка `htc_9271` підхоплюється, з'являється `wlan1`; monitor mode, `aireplay-ng --test` 30/30 на моїй точці; deauth і повний WPA2 4-way handshake захоплено на власній мережі |
+| USB-клавіатура і миша `nh-hid` (`/dev/hidg0`, `/dev/hidg1`, дескриптори android-keyboard-gadget) | ✅ | ноутбук бачить обидва пристрої, натискання і рух миші доходять; лишаються при зміні USB-режиму; `--app <пакет>` дає доступ лише цьому застосунку (інші uid отримують відмову) |
 | USB Arsenal: HID клавіатура+миша, mass storage, ACM, ECM | ✅ | USB-функції визначаються хостом (гаджет зі стокового ядра) |
 | Фікс 32-бітного busybox NetHunter (`nh-fix-nethunter`) | ✅ | 64-бітному пристрою потрібен 64-бітний busybox; застосовується щозавантаження |
 | Фікс `su: unknown user root` у NetHunter | ✅ | команди з `su` тепер працюють з NetHunter Terminal |
@@ -87,11 +88,11 @@ echo 1-1:1.0 > /sys/bus/usb/drivers/rtl8xxxu/unbind; echo 1-1:1.0 > /sys/bus/usb
 
 **Із зовнішнім адаптером:** працюйте на `wlan1` і не чіпайте `wlan0` — не запускайте `airmon-ng check kill`, він може вимкнути власний Wi-Fi телефона. Поки `airodump-ng` тримає канал, запускайте `aireplay-ng` з `--ignore-negative-one`, інакше він чекає бікона на «channel -1» і нічого не надсилає.
 
-### Неможливо на стоковому ядрі (❌) — частину дає ядро NetHunter
+### Неможливо на стоковому ядрі (❌) — це дає ядро NetHunter
 
 | Функція | Причина на стоковому ядрі | Обхід на стоку | З ядром NetHunter ([варіант B](#варіант-b-власне-ядро-nethunter-необовязково)) |
 |---|---|---|---|
-| PostgreSQL для БД Metasploit (`CONFIG_SYSVIPC`) | вмикання змінює `task_struct` → ламає KMI і всі вендорські модулі | msfconsole без БД, або БД на іншій машині | ❌ так само — ламає KMI |
+| PostgreSQL для БД Metasploit (`CONFIG_SYSVIPC`) | у стоковому ядрі вимкнено; просте вмикання змінює `task_struct` → ламає KMI і всі вендорські модулі | msfconsole без БД, або БД на іншій машині | ✅ вбудовано, KMI той самий (поля SysV — у запасних слотах `task_struct`); PostgreSQL 18 і Metasploit з БД перевірено наживо |
 | CAN ISO-TP / J1939 у ядрі | `can_proto_register` та ін. захищені в GKI `can.ko` | userspace `python-can-isotp` / `j1939` поверх `can_raw` | ✅ перевірено наживо на `vcan0` |
 | BNEP (Bluetooth PAN) | `bt_sock_register` поза KMI | — | 🟡 вантажиться, із залізом не перевіряли |
 | USB-net `rndis_host`, `qmi_wwan`, `cdc_mbim`, `dm9601`, `mcs7830` | потрібні захищені символи GKI | працюють `r8152`/`asix`/`ax88179`/`cdc_ether`/`smsc95xx` | 🟡 вантажаться, із залізом не перевіряли |
@@ -150,12 +151,13 @@ adb shell su -c "nh-wlan-driver status"   # очікувано: driver: injectio
 
 ## Варіант B: власне ядро NetHunter (необов'язково)
 
-Власне boot-ядро — **те саме ядро Google GKI**, зібране з того самого коміту ACK (`f0987337fa35`) і зі стоковим конфігом, плюс усе з офіційного списку опцій ядра NetHunter, що можна додати без зміни KMI (модулями; звірку див. у [kernel-recipe](kernel-recipe/README.uk.md#звірка-з-офіційним-списком-nethunter-106-опцій)). `uname -r` стоковий, KMI ідентичний збірці Google (усі 9175 експортів, ті самі CRC), тож вендорні модулі Qualcomm і модулі Google з `system_dlkm` вантажаться як завжди. Перевірено наживо (без прошивки, через `fastboot boot`): Wi-Fi з injection, LTE на обох SIM, усі стокові модулі; ISO-TP і J1939 — функціонально. Як зібрано й перевірено: [kernel-recipe/README.uk.md](kernel-recipe/README.uk.md).
+Власне boot-ядро — **те саме ядро Google GKI**, зібране з того самого коміту ACK (`f0987337fa35`) і зі стоковим конфігом, плюс усе з офіційного списку опцій ядра NetHunter, що можна додати без зміни KMI (модулями, а System V IPC — вбудовано з патчем, що зберігає розкладку `task_struct`; звірку див. у [kernel-recipe](kernel-recipe/README.uk.md#звірка-з-офіційним-списком-nethunter-106-опцій)). `uname -r` стоковий, KMI ідентичний збірці Google (усі 9175 експортів, ті самі CRC), тож вендорні модулі Qualcomm і модулі Google з `system_dlkm` вантажаться як завжди. Перевірено наживо (без прошивки, через `fastboot boot`): Wi-Fi з injection, LTE на обох SIM, усі стокові модулі; ISO-TP і J1939 — функціонально. Як зібрано й перевірено: [kernel-recipe/README.uk.md](kernel-recipe/README.uk.md).
 
 **Лише для прошивки C5.0-260924-2115** (ядро `ab15756704`).
 
 | Додає | Стан |
 |---|---|
+| System V IPC: PostgreSQL → база Metasploit, `ipcmk`/`ipcs` | ✅ перевірено: PostgreSQL 18, `msfconsole` + `db_connect`, ~97 тис. процесів із семафорами без помилок |
 | CAN ISO-TP / J1939, tc-фільтр за CAN-id | ✅ перевірено на `vcan0` |
 | NFS клієнт і сервер | ✅ у ядрі (монтування — з `nfs-common`/`nfs-kernel-server` у Kali) |
 | Діагностика netlink (`ss -A netlink`), `rmmod -f` | ✅ |
@@ -179,7 +181,7 @@ adb shell su -c "nh-gki status"
 
 Потрібен свіжий `fastboot` (Android SDK platform-tools); старий 31.x на macOS не бачить телефон у режимі fastboot.
 
-**Постійно** (ще не перевіряли — спершу варіант без прошивки). Прошийте в поточний слот; стоковий `boot.img` вашої прошивки тримайте поруч — ним і повертаєтесь:
+**Постійно** (перевірено: телефон сам стартує на цьому ядрі, і після звичайних перезавантажень теж; але спершу — варіант без прошивки). Прошийте в поточний слот; стоковий `boot.img` вашої прошивки тримайте поруч — ним і повертаєтесь:
 
 ```bash
 fastboot getvar current-slot
@@ -191,9 +193,11 @@ fastboot flash boot_b nethunter-boot.img
 
 Повернути стокове: `fastboot flash boot_b boot.img` (слот — ваш поточний). Magisk живе в `init_boot` і лишається. Перед оновленням Nothing OS поверніть стоковий `boot.img`.
 
-**Модуль той самий** (v6+; модуль і `nethunter-boot.img` беріть з одного релізу — модуль упізнає ядро за точним `/proc/version`): на стоковому ядрі ці функції сплять, на ядрі NetHunter `nh-gki` вантажить їх після старту — разом із власними `can.ko`/`cdc_ncm.ko`/`nfc.ko`/`usbnet.ko` замість гуглівських (у тих вирізано експорти, потрібні J1939, MBIM, PN533 і `rndis_wlan`; якщо наш не завантажиться — повертається гуглівський). Для старих USB Wi-Fi ядро NetHunter ще й лишає кілька експортів, які Google вирізає ([extra-exports.txt](kernel-recipe/extra-exports.txt)): це лише нові експорти, KMI не змінюється. Вимкнути: `nh-gki autoload off`.
+**Модуль той самий** (модуль і `nethunter-boot.img` беріть з одного релізу — модуль упізнає ядро за точним `/proc/version`; ядру з System V IPC потрібен модуль v8+): на стоковому ядрі ці функції сплять, на ядрі NetHunter `nh-gki` вантажить їх після старту — разом із власними `can.ko`/`cdc_ncm.ko`/`nfc.ko`/`usbnet.ko` замість гуглівських (у тих вирізано експорти, потрібні J1939, MBIM, PN533 і `rndis_wlan`; якщо наш не завантажиться — повертається гуглівський). Для старих USB Wi-Fi ядро NetHunter ще й лишає кілька експортів, які Google вирізає ([extra-exports.txt](kernel-recipe/extra-exports.txt)): це лише нові експорти, KMI не змінюється. Вимкнути: `nh-gki autoload off`.
 
 Ціна: у цьому ядрі вимкнено `CONFIG_MODULE_SIG_PROTECT` — інакше модулі Google з `system_dlkm`, підписані чужим для цього ядра ключем, втратили б доступ до захищених символів. Тож модулі Google вантажаться як «непідписані» (ядро позначається taint `E`), а GKI-захист символів не застосовується.
+
+System V IPC тримається на невеликому патчі ([kernel-recipe/patches](kernel-recipe/patches/)): поля `sysvsem`/`sysvshm` лежать у запасних слотах `ANDROID_KABI_RESERVE(6..8)` структури `task_struct`, тож її розмір, зміщення полів і CRC експортів ті самі, що в Google (той самий прийом використовує Halium). Ці слоти вільні в цьому коміті ACK, і жоден модуль Qualcomm чи Google не звертається до них через `current` (звернення через інші вказівники статично до кінця не відсіяні); модуль, який писав би туди, ламав би ядро при завершенні процесів — у тесті ~100 тис. процесів пройшли без помилок. Android формально вимагає `SYSVIPC` вимкненим (`android-base.config`), але на завантаження це не впливає.
 
 ---
 
@@ -207,6 +211,7 @@ fastboot flash boot_b nethunter-boot.img
 | `nh-wlan monitor [канал] \| managed \| channel N \| status` | monitor mode вбудованого Wi-Fi (типово канал 6 — **обов'язковий**, без каналу монітор мертвий) |
 | `nh-wlan-driver swap \| restore \| status \| autoswap on\|off` | підмінити драйвер вбудованого Wi-Fi на збірку з injection або повернути стоковий (підміняється автоматично при старті) |
 | `nh-gki load \| unload \| status \| autoload on\|off` | функції ядра NetHunter (варіант B): CAN ISO-TP/J1939 і USB CAN-адаптери, BT PAN, USB-net, NFC PN533, NFS, USB Wi-Fi AR9170/ZD1211/Broadcom 4320; на стоковому ядрі нічого не робить |
+| `nh-hid on [--app <пакет>] \| off \| status` | USB-клавіатура і миша (`/dev/hidg0`, `/dev/hidg1`) для HID-атак NetHunter і застосунків на зразок USB Keyboard з [android-keyboard-gadget](https://github.com/pelya/android-keyboard-gadget) — ті самі HID-дескриптори; патч ядра того проєкту тут не потрібен (configfs HID є в стоковому ядрі). `--app <пакет>` відкриває ці два вузли одному застосунку (власник — його uid, окремий тип SELinux; після перепідключення кабелю права відновлюються самі); на час увімкнення/вимкнення adb по USB на кілька секунд відпадає |
 | `nh-bt start \| stop \| status \| install-bluebinder` | вбудований Bluetooth як `hci0` через AIDL-міст |
 | `nh-fix-nethunter boot \| cache \| commands \| su \| check` | фікси NetHunter нижче |
 

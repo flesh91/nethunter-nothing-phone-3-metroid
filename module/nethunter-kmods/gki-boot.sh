@@ -9,7 +9,11 @@ LOG="$G/boot.log"
 [ -f "$G/kernel.version" ] || exit 0
 
 if [ "$(cat /proc/version)" != "$(cat "$G/kernel.version")" ]; then
-  echo "Stock kernel: NetHunter-kernel features stay idle (they need nethunter-boot.img)" > "$LOG"
+  if grep -q '(nethunter@metroid)' /proc/version; then
+    echo "Another NetHunter kernel build: features stay idle (flash the nethunter-boot.img of this module's release)" > "$LOG"
+  else
+    echo "Stock kernel: NetHunter-kernel features stay idle (they need nethunter-boot.img)" > "$LOG"
+  fi
   exit 0
 fi
 

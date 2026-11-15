@@ -16,12 +16,17 @@ set_perm "$MODPATH/system/bin/nh-wlan" 0 2000 0755
 set_perm "$MODPATH/system/bin/nh-fix-nethunter" 0 2000 0755
 set_perm "$MODPATH/system/bin/nh-wlan-driver" 0 2000 0755
 set_perm "$MODPATH/system/bin/nh-gki" 0 2000 0755
+set_perm "$MODPATH/system/bin/nh-hid" 0 2000 0755
 
 # Додаткові функції власного ядра NetHunter (варіант B): активні лише на ньому, на стоковому — сплять
 if [ -f "$MODPATH/gki/kernel.version" ]; then
   if [ "$(cat /proc/version)" = "$(cat "$MODPATH/gki/kernel.version")" ]; then
     ui_print "- NetHunter kernel detected: its extra modules (CAN, BT PAN, USB-net, NFC, NFS, old USB Wi-Fi...) load after boot"
     ui_print "  (disable: su -c nh-gki autoload off)"
+    [ -d /proc/sysvipc ] && ui_print "- System V IPC is on: PostgreSQL / Metasploit DB work in the Kali chroot"
+  elif grep -q '(nethunter@metroid)' /proc/version; then
+    ui_print "- Another NetHunter kernel build is running: its extra modules stay idle"
+    ui_print "  until the nethunter-boot.img from this same release is flashed"
   else
     ui_print "- Stock kernel: NetHunter-kernel features stay idle (they need nethunter-boot.img)"
   fi

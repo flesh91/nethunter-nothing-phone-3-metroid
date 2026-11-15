@@ -12,7 +12,10 @@
 #     nh-kbuild bash /r/build-gki.sh [config|build|check|all]
 #   /src : ACK kernel/common @ f0987337fa35 on a CASE-SENSITIVE fs (a Docker volume, not macOS APFS)
 #   /ref : stock.config + vmlinux.symvers + abi_symbollist.raw (ci.android.com build 15756704)
+# Source patches: kernel-recipe/patches/*.patch, applied in name order by the config stage. /src must
+# be the clean commit or exactly that commit + these patches; anything else stops the build.
 set -uo pipefail
+shopt -s nullglob
 ACK_SHA=f0987337fa351d7e303b071df533fd4c1c194687
 # The release string must equal stock exactly: system_dlkm keeps its modules under
 # /system_dlkm/lib/modules/<uname -r>/, so any other string means none of them are found.
@@ -28,6 +31,7 @@ J="$(nproc)"
 MK=(env GIT_DIR=/nonexistent LOCALVERSION= KBUILD_BUILD_USER=nethunter KBUILD_BUILD_HOST=metroid
     KBUILD_BUILD_VERSION=1 make ARCH=arm64 LLVM=1 LLVM_IAS=1 O="$OUT")
 STAGE="${1:-all}"
+PATCHES=("$R"/patches/*.patch)
 NEW_MODS="net/can/can-isotp.ko net/can/j1939/can-j1939.ko net/bluetooth/bnep/bnep.ko
 drivers/net/usb/rndis_host.ko drivers/net/usb/qmi_wwan.ko drivers/net/usb/cdc_mbim.ko
 drivers/usb/class/cdc-wdm.ko"
@@ -35,15 +39,68 @@ drivers/usb/class/cdc-wdm.ko"
 mkdir -p "$OUT"
 say() { echo "== $*" | tee -a "$LOG"; }
 
+# clean = the ACK commit as is; patched = exactly that commit + kernel-recipe/patches (every file the
+# patches touch equals HEAD's copy with the patches applied - created/deleted files included - and no
+# other tracked file changed); other = anything else
+same() { if [ -e "$2" ]; then [ -f "$1" ] && cmp -s "$1" "$2"; else [ ! -e "$1" ]; fi; }
+src_state() {
+  local tracked want t f p base=1 pat=1
+  tracked="$(git status --porcelain --untracked-files=no | awk '{print $2}' | sort)"
+  if [ ${#PATCHES[@]} -eq 0 ]; then [ -z "$tracked" ] && echo clean || echo other; return; fi
+  want="$(sed -n -e 's#^+++ b/##p' -e 's#^--- a/##p' "${PATCHES[@]}" | cut -f1 | sort -u)"
+  for f in $tracked; do grep -qxF -- "$f" <<<"$want" || { echo other; return; }; done
+  t="$(mktemp -d)"; mkdir -p "$t/head" "$t/new"
+  for f in $want; do
+    git cat-file -e "HEAD:$f" 2>/dev/null || continue
+    mkdir -p "$t/head/$(dirname "$f")" "$t/new/$(dirname "$f")"
+    git show "HEAD:$f" > "$t/head/$f"; cp "$t/head/$f" "$t/new/$f"
+  done
+  for p in "${PATCHES[@]}"; do patch -d "$t/new" -p1 -s -f --no-backup-if-mismatch < "$p" >/dev/null 2>&1 || pat=0; done
+  for f in $want; do same "$f" "$t/head/$f" || base=0; same "$f" "$t/new/$f" || pat=0; done
+  rm -rf "$t"
+  if [ -z "$tracked" ] && [ $base = 1 ]; then echo clean
+  elif [ $pat = 1 ]; then echo patched
+  else echo other; fi
+}
+
+# CONFIG_SYSVIPC=y without patches/0001 = task_struct shifted, 5909 CRCs changed, no vendor module
+# loads. Refuse that combination outright instead of relying on the check stage.
+sysvipc_guard() {
+  grep -q '^CONFIG_SYSVIPC=y' "$OUT/.config" 2>/dev/null || return 0
+  grep -q 'ANDROID_KABI_USE(6, struct sysv_sem sysvsem)' "$SRC/include/linux/sched.h" && return 0
+  echo "!! CONFIG_SYSVIPC=y but /src lacks kernel-recipe/patches/0001-sched-keep-SysV-IPC-state-in-KABI-reserved-slots.patch"
+  echo "   (task_struct would shift and break the KMI) - restore the patch or drop SYSVIPC from nethunter.config"
+  exit 3
+}
+
 check_src() {
   cd "$SRC" || exit 2
   [ "$(git rev-parse HEAD)" = "$ACK_SHA" ] || { echo "!! /src HEAD is not $ACK_SHA"; exit 2; }
   { [ -f net/netfilter/xt_DSCP.c ] && [ -f net/netfilter/xt_dscp.c ]; } || { echo "!! /src is not case-sensitive"; exit 2; }
-  [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "!! /src has tracked changes"; exit 2; }
-  ls localversion* >/dev/null 2>&1 && { echo "!! /src has localversion* files (would change the release string)"; exit 2; }
+  case "$(src_state)" in
+    clean|patched) ;;
+    *) echo "!! /src has tracked changes that are not exactly kernel-recipe/patches"; exit 2 ;;
+  esac
+  local lv=(localversion*)   # nullglob: empty when there are none
+  [ ${#lv[@]} -eq 0 ] || { echo "!! /src has localversion* files (would change the release string)"; exit 2; }
+}
+
+apply_patches() {
+  [ ${#PATCHES[@]} -gt 0 ] || return 0
+  case "$(src_state)" in
+    patched) say "patches: already applied (${#PATCHES[@]})" ;;
+    clean)
+      say "patches: applying ${#PATCHES[@]}"
+      for p in "${PATCHES[@]}"; do
+        git apply "$p" || { echo "!! $(basename "$p") does not apply"; exit 3; }
+        echo "  $(basename "$p")" | tee -a "$LOG"
+      done ;;
+    *) echo "!! /src has unexpected tracked changes"; exit 2 ;;
+  esac
 }
 
 stage_config() {
+  apply_patches
   say "config: stock ikconfig (ab15756704) + nethunter.config + SIG_PROTECT off"
   # Google's export list for this build; the stock config names it relative to srctree.
   # + extra-exports.txt: vmlinux functions Google keeps unexported (TRIM_UNUSED_KSYMS) that USB Wi-Fi
@@ -62,6 +119,7 @@ EOF
   ./scripts/kconfig/merge_config.sh -m -O "$OUT" "$OUT/.config" \
       "$R/nethunter.config" "$OUT/nh-overrides.config" >>"$LOG" 2>&1 || { echo "!! merge failed"; exit 3; }
   "${MK[@]}" olddefconfig >>"$LOG" 2>&1 || { echo "!! olddefconfig failed"; tail -20 "$LOG"; exit 3; }
+  sysvipc_guard
   python3 - "$REF/stock.config" "$OUT/.config" <<'PY' | tee -a "$LOG"
 import re, sys
 skip = re.compile(r'CONFIG_(CC_VERSION_TEXT|CLANG_VERSION|LLD_VERSION|AS_VERSION|LD_VERSION|RUSTC_VERSION|RUSTC_LLVM_VERSION|BINDGEN_VERSION_TEXT|GCC_VERSION)$')
@@ -86,6 +144,9 @@ PY
 }
 
 stage_build() {
+  if [ ${#PATCHES[@]} -gt 0 ] && [ "$(src_state)" != patched ]; then
+    echo "!! kernel-recipe/patches are not applied to /src - run the config stage first"; exit 2; fi
+  sysvipc_guard
   say "build: Image + modules (-j$J)"
   local t0=$SECONDS
   "${MK[@]}" -j"$J" Image modules >>"$LOG" 2>&1; local rc=$?
