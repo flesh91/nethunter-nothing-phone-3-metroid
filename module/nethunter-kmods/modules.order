@@ -15,12 +15,15 @@ btintel.ko
 btmtk.ko
 btrtl.ko
 btusb.ko
+can327.ko
 ch341.ko
 cp210x.ko
 crc-itu-t.ko
 eeprom_93cx6.ko
+f81604.ko
 gs_usb.ko
 hci_vhci.ko
+mcba_usb.ko
 mt76.ko
 mt76-connac-lib.ko
 mt76-usb.ko

@@ -9,9 +9,10 @@
 #           створити посилання скриптом модуля NetHunter
 #   cache — (з service.sh, після розблокування) зберегти 64-бітний busybox_nh із застосунку
 #           в /data/adb (дані застосунку зашифровані до першого розблокування)
-#   commands [--force-stop] — замінити в Custom Commands застосунку NetHunter стандартні
+#   commands [--force-stop] — у Custom Commands застосунку NetHunter: замінити стандартні
 #           «Start/Stop wlan0 monitor mode» на виклики nh-wlan (стандартні не ставлять канал і
-#           не чекають вимкнення Wi-Fi — монітор виходить «мертвим», 0 кадрів)
+#           не чекають вимкнення Wi-Fi — монітор виходить «мертвим», 0 кадрів), і ДОДАТИ
+#           «Start/Stop wlan0 coexistence monitor» (nh-wlan coex — монітор поряд із живим Wi-Fi)
 #   su    — зробити su в модулі NetHunter посиланням на Magisk su (замість busybox)
 #   check — лише показати стан
 NH=/data/adb/modules/nethunter
@@ -128,18 +129,51 @@ patch_commands() {
 import sqlite3, sys
 START = r"""echo -ne "\033]0;Wlan0 Monitor Mode\007" && clear; : nethunter-kmods; su -c 'nh-wlan monitor 6' && sleep 2 && exit"""
 STOP = r"""echo -ne "\033]0;Stopping Wlan0 Mon Mode\007" && clear; : nethunter-kmods; su -c 'nh-wlan managed' && sleep 2 && exit"""
-NEW = {"Start wlan0 in monitor mode": START, "Stop wlan0 monitor mode": STOP}
+# Coexistence monitor: a mon0 interface alongside the live STA link (Wi-Fi stays up).
+COEX_START = r"""echo -ne "\033]0;Wlan0 Coex Monitor\007" && clear; : nethunter-kmods; su -c 'nh-wlan coex' && sleep 2 && exit"""
+COEX_STOP = r"""echo -ne "\033]0;Stop Wlan0 Coex Mon\007" && clear; : nethunter-kmods; su -c 'nh-wlan coex stop' && sleep 2 && exit"""
+UPDATE = {"Start wlan0 in monitor mode": START, "Stop wlan0 monitor mode": STOP}
+# Added (not replacing anything) so the user gets dedicated coexistence entries.
+ADD = [("Start wlan0 coexistence monitor", COEX_START),
+       ("Stop wlan0 coexistence monitor", COEX_STOP)]
 c = sqlite3.connect(sys.argv[1])
-for rid, label, cmd in c.execute("select id, CommandLabel, Command from CustomCommandsFragment").fetchall():
-    if label not in NEW:
+info = c.execute("PRAGMA table_info(CustomCommandsFragment)").fetchall()
+cols = [r[1] for r in info]
+pk = [r[1] for r in info if r[5]]
+rows = c.execute("select id, CommandLabel, Command from CustomCommandsFragment").fetchall()
+labels = {label for _, label, _ in rows}
+template = None
+for row in c.execute("select * from CustomCommandsFragment").fetchall():
+    template = dict(zip(cols, row)); break
+for rid, label, cmd in rows:
+    if label not in UPDATE:
         continue
-    if cmd == NEW[label]:
+    if cmd == UPDATE[label]:
         print(f"'{label}': already uses nh-wlan")
     elif "CON_MODE_PATH" in cmd or "nethunter-kmods" in cmd:
-        c.execute("update CustomCommandsFragment set Command=?, RuntimeEnv='android' where id=?", (NEW[label], rid))
+        c.execute("update CustomCommandsFragment set Command=?, RuntimeEnv='android' where id=?", (UPDATE[label], rid))
         print(f"'{label}': replaced with nh-wlan")
     else:
         print(f"'{label}': customized by user, left unchanged")
+# Add the coexistence entries by cloning an existing row's exact schema (so every
+# NOT NULL / app-specific column is populated), changing only label/command/env.
+for label, cmd in ADD:
+    if label in labels:
+        print(f"'{label}': already present")
+    elif template is None:
+        print(f"'{label}': no template row to clone, skipped")
+    else:
+        row = dict(template)
+        row["CommandLabel"] = label
+        row["Command"] = cmd
+        if "RuntimeEnv" in row:
+            row["RuntimeEnv"] = "android"
+        for p in pk:
+            row.pop(p, None)
+        ins = list(row.keys())
+        c.execute("insert into CustomCommandsFragment (%s) values (%s)" % (
+            ",".join(ins), ",".join(["?"] * len(ins))), [row[k] for k in ins])
+        print(f"'{label}': added")
 c.commit()
 PY
 )"; rc=$?

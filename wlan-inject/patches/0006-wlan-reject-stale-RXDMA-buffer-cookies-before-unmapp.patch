@@ -1,0 +1,57 @@
+From 875926dbc06e58280129f5899fa5e013a1680a80 Mon Sep 17 00:00:00 2001
+From: Loukious <24696530+Loukious@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 02:42:55 +0100
+Subject: [PATCH 6/9] wlan: reject stale RXDMA buffer cookies before unmapping
+
+An RXDMA error-list cookie can resolve to a descriptor whose buffer has
+already been replenished. Require a non-NULL skb and compare the reported
+physical address with that skb's current fragment address before syncing
+or releasing the buffer.
+
+Count and rate-limit reports of mismatches while leaving the current
+buffer untouched.
+
+Port the matching kernel-tree source delta with the modules/ path prefix
+removed.
+
+Source-commit: 44c7c56a375711a22b34318fb9ecb55ca43fce42
+Signed-off-by: Loukious <24696530+Loukious@users.noreply.github.com>
+---
+ qca-wifi-host-cmn/dp/wifi3.0/dp_rx_err.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/qca-wifi-host-cmn/dp/wifi3.0/dp_rx_err.c b/qca-wifi-host-cmn/dp/wifi3.0/dp_rx_err.c
+index 4a6e290..9b61d84 100644
+--- a/qca-wifi-host-cmn/dp/wifi3.0/dp_rx_err.c
++++ b/qca-wifi-host-cmn/dp/wifi3.0/dp_rx_err.c
+@@ -3152,6 +3152,7 @@ dp_rx_err_mpdu_pop(struct dp_soc *soc, uint32_t mac_id,
+ 				bm_action = HAL_BM_ACTION_RELEASE_MSDU_LIST;
+ 			else {
+ 				for (i = 0; i < num_msdus; i++) {
++					qdf_dma_addr_t buf_paddr;
+ 					struct dp_rx_desc *rx_desc =
+ 						soc->arch_ops.
+ 						dp_rx_desc_cookie_2_va(
+@@ -3179,6 +3180,19 @@ dp_rx_err_mpdu_pop(struct dp_soc *soc, uint32_t mac_id,
+ 						continue;
+ 					}
+ 
++					/* The cookie may refer to a replenished buffer. */
++					buf_paddr = msdu ?
++						qdf_nbuf_get_frag_paddr(msdu, 0) : 0;
++					if (qdf_unlikely(!msdu ||
++							 msdu_list.paddr[i] != buf_paddr)) {
++						DP_STATS_INC(soc, rx.err.nbuf_sanity_fail, 1);
++						dp_rx_err_info_rl("RXDMA cookie 0x%x paddr 0x%llx expected 0x%llx",
++							msdu_list.sw_cookie[i],
++							(unsigned long long)msdu_list.paddr[i],
++							(unsigned long long)buf_paddr);
++						continue;
++					}
++
+ 					if (rx_desc->unmapped == 0) {
+ 						rx_desc_pool =
+ 							&soc->rx_desc_buf[rx_desc->pool_id];
+-- 
+2.47.1
+

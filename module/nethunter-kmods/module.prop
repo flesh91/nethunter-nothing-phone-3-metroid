@@ -1,6 +1,6 @@
 id=nethunter-kmods
 name=NetHunter kernel modules (Nothing Phone 3)
-version=v8
-versionCode=8
+version=v11
+versionCode=11
 author=flesh91
-description=USB Wi-Fi (monitor/injection; + rtl8192cu, ath6kl, zd1201), internal Wi-Fi monitor + packet injection 2.4/5 GHz (nh-wlan, nh-wlan-driver), 64-bit busybox fix for NetHunter module, Bluetooth USB + built-in BT via nh-btbridge (AIDL HAL -> /dev/vhci), USB-serial, USB-net, CAN; with the NetHunter kernel also System V IPC (PostgreSQL / Metasploit DB), CAN ISO-TP/J1939 + Kvaser/EMS/ESD/UCAN, BNEP, BPA10x, USB RNDIS/QMI/MBIM/DM9601/MCS7830, PN533 NFC, NFS client+server, USB Wi-Fi carl9170/zd1211rw/rndis_wlan (nh-gki) - for GKI 6.6.127-android15-8-ab15756704
+description=USB Wi-Fi (monitor/injection; + rtl8192cu, ath6kl, zd1201), internal Wi-Fi monitor + packet injection 2.4/5 GHz, incl. STA+monitor and AP+monitor coexistence (a monitor alongside a live Wi-Fi link or a SoftAP via nh-wlan coex) (nh-wlan, nh-wlan-driver), 64-bit busybox fix for NetHunter module, Bluetooth USB + built-in BT via nh-btbridge (AIDL HAL -> /dev/vhci), USB-serial, USB-net, CAN; with the NetHunter kernel also System V IPC (PostgreSQL / Metasploit DB), CAN ISO-TP/J1939 + Kvaser/EMS/ESD/UCAN, BNEP, BPA10x, USB RNDIS/QMI/MBIM/DM9601/MCS7830, PN533 NFC, NFS client+server, USB Wi-Fi carl9170/zd1211rw/rndis_wlan (nh-gki) - for GKI 6.6.127-android15-8-ab15756704

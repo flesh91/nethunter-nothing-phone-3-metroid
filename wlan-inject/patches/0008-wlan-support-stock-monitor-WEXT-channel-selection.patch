@@ -1,0 +1,250 @@
+From 0b6f7a2395fd0970a95205a1621ebc46392d1bf9 Mon Sep 17 00:00:00 2001
+From: Loukious <24696530+Loukious@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 00:24:40 +0200
+Subject: [PATCH 8/9] wlan: support stock monitor WEXT channel selection
+
+Add a SIOCSIWFREQ handler for the monitor interface so iwconfig, reaver
+and wash can set the capture channel through WEXT, instead of relying on
+nh-wlan to write con_mode/channel out of band. The handler reuses the
+cfg80211 monitor set-channel path, with ownership, admission and a
+firmware completion readback.
+
+Port of Loukious c7547e0 to the Nothing 5.2.1.123K tree without the
+STA/monitor coexistence series: drop the sta_mon_coexist branch in the
+chandef read (use the active vdev channel directly), drop the
+sta_mon_stop_failed guard, treat a missing first capture channel as the
+standalone case, and call the two-argument __wlan_hdd_cfg80211_set_mon_ch.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.c | 169 ++++++++++++++++++++
+ qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.h |   7 +
+ qcacld-3.0/core/hdd/src/wlan_hdd_main.c     |  12 ++
+ 3 files changed, 188 insertions(+)
+
+diff --git a/qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.c b/qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.c
+index 0f251c1..140dd48 100644
+--- a/qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.c
++++ b/qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.c
+@@ -32573,6 +32573,175 @@ wlan_hdd_cfg80211_get_channel_mon(struct wiphy *wiphy,
+ 
+ 	return 0;
+ }
++
++#if defined(CONFIG_WIRELESS_EXT) && defined(FEATURE_FRAME_INJECTION_SUPPORT)
++static int hdd_monitor_wext_freq_mhz(const struct iw_freq *freq)
++{
++	u64 hz;
++	int exponent;
++
++	if (!freq || freq->m <= 0 || freq->e < 0 || freq->e > 9 ||
++	    freq->i || (freq->flags & ~IW_FREQ_FIXED))
++		return -EINVAL;
++	if (!freq->e) {
++		/* WEXT channel numbers do not distinguish 6 GHz from 2.4/5 GHz. */
++		if (freq->m > 196)
++			return -EINVAL;
++		return ieee80211_channel_to_frequency(freq->m,
++			freq->m <= 14 ? NL80211_BAND_2GHZ : NL80211_BAND_5GHZ);
++	}
++
++	/* A positive s32 mantissa times at most 10^9 cannot overflow u64. */
++	hz = freq->m;
++	for (exponent = 0; exponent < freq->e; exponent++)
++		hz *= 10;
++	if (hz % 1000000 || hz / 1000000 > INT_MAX)
++		return -EINVAL;
++	return hz / 1000000;
++}
++
++static int hdd_monitor_wext_get_chandef(struct wiphy *wiphy,
++				      struct hdd_adapter *adapter,
++				      struct cfg80211_chan_def *chandef)
++{
++	struct wlan_channel channel;
++	struct wlan_objmgr_vdev *vdev;
++	struct wlan_channel *active;
++	int ret;
++
++	/* A desired channel alone does not establish a completed retune. */
++	vdev = hdd_objmgr_get_vdev_by_user(adapter->deflink, WLAN_OSIF_ID);
++	if (!vdev)
++		return -ENODATA;
++	active = wlan_vdev_get_active_channel(vdev);
++	ret = -ENODATA;
++	if (QDF_IS_STATUS_SUCCESS(wlan_vdev_is_up_active_state(vdev)) &&
++	    active && active->ch_freq) {
++		qdf_mem_copy(&channel, active, sizeof(channel));
++		ret = 0;
++	}
++	hdd_objmgr_put_vdev_by_user(vdev, WLAN_OSIF_ID);
++	if (ret)
++		return ret;
++	chandef->chan = ieee80211_get_channel(wiphy, channel.ch_freq);
++	if (!chandef->chan)
++		return -EINVAL;
++	chandef->center_freq1 = channel.ch_cfreq1 ?: channel.ch_freq;
++	wlan_hdd_update_chandef(chandef, channel.ch_width,
++				channel.ch_cfreq2, false);
++	wlan_hdd_set_chandef_for_11be(chandef, &channel);
++	return 0;
++}
++
++/**
++ * wlan_hdd_monitor_wext_set_freq() - Legacy monitor-only channel compatibility
++ * @dev: Monitor interface pinned by the WEXT dispatcher's RTNL lock
++ * @freq: Channel number or frequency encoded as a mantissa and exponent
++ *
++ * Reuse the cfg80211 monitor operation, including ownership, channel admission,
++ * injection drain and firmware completion checks. WEXT carries no bandwidth;
++ * selecting the current primary preserves its full definition, while changing
++ * the primary requests 20 MHz. Multi-link and 6 GHz requests require nl80211.
++ *
++ * Return: 0 only after successful channel readback, or a negative error.
++ */
++int wlan_hdd_monitor_wext_set_freq(struct net_device *dev,
++				 const struct iw_freq *freq)
++{
++	struct cfg80211_chan_def active_chandef = {0}, requested = {0}, observed = {0};
++	struct osif_psoc_sync *psoc_sync;
++	struct hdd_adapter *adapter;
++	struct hdd_context *hdd_ctx;
++	struct ieee80211_channel *channel;
++	struct wiphy *wiphy;
++	int mhz, ret;
++
++	mhz = hdd_monitor_wext_freq_mhz(freq);
++	if (mhz <= 0)
++		return mhz ?: -EINVAL;
++	if (!dev || !dev->ieee80211_ptr || !dev->ieee80211_ptr->wiphy)
++		return -ENODEV;
++	wiphy = dev->ieee80211_ptr->wiphy;
++	/* WEXT pins the netdev under RTNL; serialize with modern channel users. */
++	wiphy_lock(wiphy);
++	ret = osif_psoc_sync_op_start(wiphy_dev(wiphy), &psoc_sync);
++	if (ret)
++		goto unlock;
++	adapter = WLAN_HDD_GET_PRIV_PTR(dev);
++	ret = hdd_validate_adapter(adapter);
++	if (ret || !adapter->deflink || adapter->device_mode != QDF_MONITOR_MODE ||
++	    dev->ieee80211_ptr->iftype != NL80211_IFTYPE_MONITOR) {
++		ret = -EINVAL;
++		goto stop;
++	}
++	hdd_ctx = WLAN_HDD_GET_CTX(adapter);
++	ret = wlan_hdd_validate_context(hdd_ctx);
++	if (ret)
++		goto stop;
++	if (hdd_ctx->wiphy != wiphy) {
++		ret = -EINVAL;
++		goto stop;
++	}
++	if (!netif_running(dev) ||
++	    !test_bit(DEVICE_IFACE_OPENED, &adapter->event_flags)) {
++		ret = -ENETDOWN;
++		goto stop;
++	}
++	if (adapter->delete_in_progress ||
++	    adapter->monitor_mode_vdev_up_in_progress) {
++		ret = -EBUSY;
++		goto stop;
++	}
++	if (hweight_long(READ_ONCE(adapter->active_links)) != 1) {
++		ret = -EOPNOTSUPP;
++		goto stop;
++	}
++	channel = ieee80211_get_channel(wiphy, mhz);
++	if (!channel) {
++		ret = -EINVAL;
++		goto stop;
++	}
++	if (channel->band != NL80211_BAND_2GHZ &&
++	    channel->band != NL80211_BAND_5GHZ) {
++		ret = -EOPNOTSUPP;
++		goto stop;
++	}
++	if (channel->flags & IEEE80211_CHAN_DISABLED) {
++		ret = -EOPNOTSUPP;
++		goto stop;
++	}
++	ret = hdd_monitor_wext_get_chandef(wiphy, adapter, &active_chandef);
++	/* A standalone monitor may not have its first capture channel yet. */
++	if (ret && ret != -ENODATA)
++		goto stop;
++	if (!ret && (!active_chandef.chan || !cfg80211_chandef_valid(&active_chandef))) {
++		ret = ret ?: -EINVAL;
++		goto stop;
++	}
++	if (!ret && active_chandef.chan->center_freq == mhz) {
++		/* WEXT supplies no width/centers: preserve the active definition. */
++		requested = active_chandef;
++		goto verify;
++	}
++	cfg80211_chandef_create(&requested, channel, NL80211_CHAN_NO_HT);
++	ret = __wlan_hdd_cfg80211_set_mon_ch(wiphy, &requested);
++	if (ret)
++		goto stop;
++verify:
++	ret = hdd_monitor_wext_get_chandef(wiphy, adapter, &observed);
++	/* Firmware reports 20 MHz without distinguishing HT from legacy PHY. */
++	if (!ret && requested.width == NL80211_CHAN_WIDTH_20_NOHT &&
++	    observed.width == NL80211_CHAN_WIDTH_20)
++		observed.width = NL80211_CHAN_WIDTH_20_NOHT;
++	if (!ret && !cfg80211_chandef_identical(&requested, &observed))
++		ret = -EIO;
++stop:
++	osif_psoc_sync_op_stop(psoc_sync);
++unlock:
++	wiphy_unlock(wiphy);
++	return ret;
++}
++#endif
+ #endif
+ 
+ static int __wlan_hdd_cfg80211_get_channel(struct wiphy *wiphy,
+diff --git a/qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.h b/qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.h
+index 2d1d475..61ca71c 100644
+--- a/qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.h
++++ b/qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.h
+@@ -35,6 +35,13 @@
+ struct hdd_context;
+ struct wlan_hdd_link_info;
+ 
++#if defined(FEATURE_MONITOR_MODE_SUPPORT) && defined(CONFIG_WIRELESS_EXT) && \
++	defined(FEATURE_FRAME_INJECTION_SUPPORT)
++struct iw_freq;
++int wlan_hdd_monitor_wext_set_freq(struct net_device *dev,
++				 const struct iw_freq *freq);
++#endif
++
+ #define CONFIG_MAX QCA_WLAN_VENDOR_ATTR_ADJUST_TX_POWER_CONFIG_MAX
+ #define RATE_TYPE QCA_WLAN_VENDOR_ATTR_ADJUST_TX_POWER_RATE_TYPE
+ #define RATE_VALUE QCA_WLAN_VENDOR_ATTR_ADJUST_TX_POWER_RATE_VALUE
+diff --git a/qcacld-3.0/core/hdd/src/wlan_hdd_main.c b/qcacld-3.0/core/hdd/src/wlan_hdd_main.c
+index 0aeeb3d..f31d362 100644
+--- a/qcacld-3.0/core/hdd/src/wlan_hdd_main.c
++++ b/qcacld-3.0/core/hdd/src/wlan_hdd_main.c
+@@ -16413,8 +16413,20 @@ static int hdd_monitor_wext_giwfreq(struct net_device *dev,
+ 	return 0;
+ }
+ 
++#ifdef FEATURE_MONITOR_MODE_SUPPORT
++static int hdd_monitor_wext_siwfreq(struct net_device *dev,
++				    struct iw_request_info *info,
++				    union iwreq_data *wrqu, char *extra)
++{
++	return wlan_hdd_monitor_wext_set_freq(dev, &wrqu->freq);
++}
++#endif
++
+ static const iw_handler hdd_monitor_wext_handlers[] = {
+ 	[IW_IOCTL_IDX(SIOCGIWNAME)] = hdd_monitor_wext_giwname,
++#ifdef FEATURE_MONITOR_MODE_SUPPORT
++	[IW_IOCTL_IDX(SIOCSIWFREQ)] = hdd_monitor_wext_siwfreq,
++#endif
+ 	[IW_IOCTL_IDX(SIOCGIWFREQ)] = hdd_monitor_wext_giwfreq,
+ 	[IW_IOCTL_IDX(SIOCGIWMODE)] = hdd_monitor_wext_giwmode,
+ };
+-- 
+2.47.1
+

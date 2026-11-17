@@ -1,14 +1,19 @@
 #!/system/bin/sh
-# nh-wlan monitor [канал, типово 6] | managed | channel <канал> | status
+# nh-wlan monitor [канал, типово 6] | managed | channel <канал> | coex [stop] | status
 # Глобальний monitor mode вбудованого Wi-Fi (Qualcomm qcacld-3.0, параметр con_mode=4).
 # Без явно виставленого каналу інтерфейс у моніторі не приймає жодного кадру (NO-CARRIER) —
 # тому monitor завжди ставить канал (типово 6).
 # Інжекція: стоковий драйвер у моніторі лише приймає; з драйвером інжекції, який модуль підміняє
 # після старту (перевірка: nh-wlan-driver status), у цьому ж режимі працює й інжекція.
-# Паралельний монітор поряд із підключенням не підтримується — тому на час монітора
-# Wi-Fi в Android вимикається.
+#
+# monitor/managed/channel працюють із con_mode=4 на самому wlan0 — Android Wi-Fi при цьому вимикається.
+# coex — окремий шлях: монітор-vdev (mon0) ПОРЯД із підключенням STA на тому ж каналі, Android Wi-Fi
+# лишається ввімкненим (потрібен драйвер інжекції, завантажений із sta_monitor_coexist=1 — так робить
+# nh-wlan-driver). Захват/інжекція на mon0 — інструментами з Kali chroot (airodump-ng/hcxdumptool -i mon0),
+# бо Android-tcpdump не має CAP_NET_RAW на новому інтерфейсі.
 STATE=/data/adb/nethunter-kmods-wlan
 IFACE=wlan0
+MON=mon0
 mkdir -p "$STATE"
 
 # параметр con_mode завантаженого драйвера (qca_cld3_wcn7750 на Phone (3))
@@ -27,6 +32,11 @@ iw() {
   elif [ -x "$KALI/usr/sbin/iw" ]; then chroot "$KALI" /usr/sbin/iw "$@"
   else echo "iw not found (install NetHunter Kali chroot)" >&2; return 127; fi
 }
+
+# коексистенція доступна, лише якщо драйвер завантажено з sta_monitor_coexist=1 (read-only параметр)
+coexistence_enabled() { grep -qx Y /sys/module/qca_cld3_*/parameters/sta_monitor_coexist 2>/dev/null; }
+# phy вбудованого радіо (для iw interface add)
+wlan_phy() { cat /sys/class/net/$IFACE/phy80211/name 2>/dev/null; }
 
 # збірка драйвера з інжекцією впізнається за параметром, якого у стоковому немає
 injection_capable() { ls /sys/module/qca_cld3_*/parameters/injection_dp_inflight_limit >/dev/null 2>&1; }
@@ -90,12 +100,59 @@ case "$1" in
       wait_for "Wi-Fi on" 'wifi_enabled' 15 && echo "Android Wi-Fi turned back on"
     fi
     ;;
+  coex)
+    if [ "$2" = "stop" ]; then
+      [ -e /sys/class/net/$MON ] || { echo "$MON not present"; exit 0; }
+      # wifi-vdev видаляється лише через nl80211 (iw dev del), НЕ через ip link del (rtnetlink -> EPERM);
+      # del_virtual_intf -> hdd_sta_mon_prepare_stop драйвер сам дренить інжекцію й чисто зупиняє монітор.
+      ip link set $MON down 2>/dev/null
+      iw dev $MON del || { echo "failed to delete $MON (try: iw dev $MON del)"; exit 1; }
+      echo "coexistence monitor removed; $IFACE STA link unaffected"
+      exit 0
+    fi
+    coexistence_enabled || { echo "coexistence not available: driver loaded without sta_monitor_coexist=1 (nh-wlan-driver sets it; reload: nh-wlan-driver restore && nh-wlan-driver swap)"; exit 1; }
+    injection_capable || { echo "coexistence needs the injection driver (nh-wlan-driver status)"; exit 1; }
+    wifi_enabled || { echo "turn Android Wi-Fi on and connect first — the coexistence monitor rides the STA link's channel"; exit 1; }
+    [ "$(iface_type)" = "1" ] || { echo "$IFACE is not in managed mode — run nh-wlan managed first"; exit 1; }
+    # A mon0 left over from a torn-down session (real roam/disconnect, or a prior
+    # coex) can linger as a dead netdev that refuses to come back up (rtnetlink
+    # EPERM). Reuse it only if it is actually up; otherwise delete and recreate.
+    if [ -e /sys/class/net/$MON ]; then
+      if [ "$(( $(cat /sys/class/net/$MON/flags 2>/dev/null) & 1 ))" = "1" ]; then
+        echo "$MON already up"
+      else
+        iw dev $MON del 2>/dev/null; sleep 1
+      fi
+    fi
+    if [ ! -e /sys/class/net/$MON ]; then
+      PHY="$(wlan_phy)"; [ -n "$PHY" ] || { echo "cannot find the Wi-Fi phy"; exit 1; }
+      # flags otherbss -> QDF_MONITOR_FLAG_OTHER_BSS -> is_rx_mon -> коекс-шлях (монітор поряд зі STA)
+      iw phy "$PHY" interface add $MON type monitor flags otherbss 2>&1 || { echo "failed to add $MON"; exit 1; }
+      ip link set $MON up 2>&1 || { iw dev $MON del 2>/dev/null; echo "failed to bring $MON up"; exit 1; }
+      sleep 1
+      # confirm it really came up (a stale vdev can accept 'up' then stay down)
+      [ "$(( $(cat /sys/class/net/$MON/flags 2>/dev/null) & 1 ))" = "1" ] || {
+        iw dev $MON del 2>/dev/null; echo "$MON did not come up — retry: nh-wlan coex"; exit 1; }
+    fi
+    echo "coexistence monitor: $MON up alongside $IFACE on $(iw dev $IFACE link 2>/dev/null | sed -n 's/.*freq: *\([0-9]*\).*/\1 MHz/p' | head -1) (STA stays connected)"
+    echo "capture/inject on $MON from the Kali chroot, e.g.: airodump-ng -i $MON  |  hcxdumptool -i $MON"
+    echo "stop with: nh-wlan coex stop"
+    ;;
   status)
     echo "con_mode: $(cat "$P") ($P)"
     case "$(iface_type)" in 803) echo "$IFACE: monitor";; 1) echo "$IFACE: managed";; "") echo "$IFACE: absent";; *) echo "$IFACE: type $(iface_type)";; esac
     iw dev $IFACE info 2>/dev/null | grep -E "channel" | sed 's/^[[:space:]]*//'
     injection_capable && echo "injection: supported (injection driver loaded)" || echo "injection: not supported (stock driver)"
+    if coexistence_enabled; then
+      if [ -e /sys/class/net/$MON ]; then
+        echo "coexistence: available, $MON active alongside $IFACE"
+      else
+        echo "coexistence: available (start: nh-wlan coex)"
+      fi
+    else
+      echo "coexistence: not enabled in the loaded driver"
+    fi
     wifi_enabled && echo "Android Wi-Fi: on" || echo "Android Wi-Fi: off"
     ;;
-  *) echo "usage: nh-wlan monitor [channel, default 6] | managed | channel <N> | status"; exit 1 ;;
+  *) echo "usage: nh-wlan monitor [channel, default 6] | managed | channel <N> | coex [stop] | status"; exit 1 ;;
 esac

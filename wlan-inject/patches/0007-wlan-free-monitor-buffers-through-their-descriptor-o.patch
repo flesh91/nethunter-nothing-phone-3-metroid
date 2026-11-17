@@ -1,0 +1,39 @@
+From 49948bf1271c878b5ffa09be7a610fc3442ca0df Mon Sep 17 00:00:00 2001
+From: Loukious <24696530+Loukious@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 02:42:55 +0100
+Subject: [PATCH 7/9] wlan: free monitor buffers through their descriptor owner
+
+When allocation of a monitor parent skb fails, release the receive buffer
+through dp_rx_mon_buffer_free(). This selects the fragment or skb release
+operation from the descriptor instead of treating its TLV data pointer
+as an independently owned fragment.
+
+Clear the local msdu pointer before entering the shared drop path, matching
+the other monitor buffer disposal paths.
+
+Port the matching kernel-tree source delta with the modules/ path prefix
+removed.
+
+Source-commit: c647d0904ac5b6e67b4ddc05e3650f8da0469d01
+Signed-off-by: Loukious <24696530+Loukious@users.noreply.github.com>
+---
+ qca-wifi-host-cmn/dp/wifi3.0/monitor/1.0/dp_rx_mon_dest_1.0.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/qca-wifi-host-cmn/dp/wifi3.0/monitor/1.0/dp_rx_mon_dest_1.0.c b/qca-wifi-host-cmn/dp/wifi3.0/monitor/1.0/dp_rx_mon_dest_1.0.c
+index 1e0f251..7fe73b5 100644
+--- a/qca-wifi-host-cmn/dp/wifi3.0/monitor/1.0/dp_rx_mon_dest_1.0.c
++++ b/qca-wifi-host-cmn/dp/wifi3.0/monitor/1.0/dp_rx_mon_dest_1.0.c
+@@ -372,7 +372,8 @@ dp_rx_mon_mpdu_pop(struct dp_soc *soc, uint32_t mac_id,
+ 					DP_STATS_INC(dp_pdev,
+ 						     replenish.nbuf_alloc_fail,
+ 						     1);
+-					qdf_frag_free(rx_desc_tlv);
++					dp_rx_mon_buffer_free(rx_desc);
++					msdu = NULL;
+ 					dp_rx_mon_dest_debug("failed to allocate parent buffer to hold all frag");
+ 					drop_mpdu = true;
+ 					goto next_msdu;
+-- 
+2.47.1
+

@@ -1,0 +1,34 @@
+From 525003837eb93e1e251c6fdccedf59a5af9bbfa1 Mon Sep 17 00:00:00 2001
+From: Loukious <24696530+Loukious@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 00:24:40 +0200
+Subject: [PATCH 9/9] wlan: convert monitor-open QDF status to Linux errno
+
+hdd_enable_monitor_mode() returned the raw QDF_STATUS from
+cdp_set_monitor_mode() as its int result, so a non-success status reached
+user space as a wrong (often positive) errno. Convert it with
+qdf_status_to_os_return().
+
+Hunk (c) of Loukious 71e6f9a; the other two hunks belong to the STA/monitor
+coexistence series and do not apply to this tree.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ qcacld-3.0/core/hdd/src/wlan_hdd_rx_monitor.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/qcacld-3.0/core/hdd/src/wlan_hdd_rx_monitor.c b/qcacld-3.0/core/hdd/src/wlan_hdd_rx_monitor.c
+index 056d09f..c7643df 100644
+--- a/qcacld-3.0/core/hdd/src/wlan_hdd_rx_monitor.c
++++ b/qcacld-3.0/core/hdd/src/wlan_hdd_rx_monitor.c
+@@ -39,7 +39,7 @@ int hdd_enable_monitor_mode(struct net_device *dev)
+ 	if (vdev_id == (uint8_t)-EINVAL)
+ 		return -EINVAL;
+ 
+-	return cdp_set_monitor_mode(soc, vdev_id, false);
++	return qdf_status_to_os_return(cdp_set_monitor_mode(soc, vdev_id, false));
+ }
+ 
+ int hdd_disable_monitor_mode(void)
+-- 
+2.47.1
+

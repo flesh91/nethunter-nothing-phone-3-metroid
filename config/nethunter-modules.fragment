@@ -90,5 +90,11 @@ CONFIG_USB_NET_SMSC95XX=m
 CONFIG_CAN_GS_USB=m
 CONFIG_CAN_8DEV_USB=m
 CONFIG_CAN_PEAK_USB=m
+CONFIG_CAN_F81604=m
+CONFIG_CAN_MCBA_USB=m
+# can327 (ELM327/OBD-II через serdev/tty) — найтиповіший дешевий CAN-адаптер.
+# select CAN_RX_OFFLOAD тягне can_rx_offload_* зі стокового can-dev (CONFIG_CAN_DEV у GKI),
+# усі імпорти трьох модулів задоволені незахищеними експортами стокового GKI (перевірено).
+CONFIG_CAN_CAN327=m
 # CONFIG_CAN_ISOTP — неможливо на стоковому GKI: can_proto_register та ін. захищені у GKI can.ko → ISO-TP у userspace (python-can-isotp)
 # CONFIG_CAN_J1939 — неможливо на стоковому GKI: те саме, що ISOTP → userspace (python j1939)

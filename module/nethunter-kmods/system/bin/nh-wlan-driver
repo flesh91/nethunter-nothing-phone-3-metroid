@@ -99,7 +99,11 @@ case "$1" in
       rm -f "$MARK"; sync; exit 4
     fi
     sleep 2
-    if ! insmod "$OURS" 2>>"$LOG"; then
+    # Load with STA/AP + monitor coexistence available (read-only params, set at insmod only).
+    # It is off-path until a coexistence monitor is actually created (nh-wlan coex); a driver
+    # built without these params would reject them, so fall back to a plain load.
+    if ! insmod "$OURS" sta_monitor_coexist=1 ap_monitor_coexist=1 2>>"$LOG" && \
+       ! insmod "$OURS" 2>>"$LOG"; then
       say "Kernel refused the injection driver - restoring the stock one"
       insmod "$STOCK" 2>>"$LOG" || say "Could not restore the stock driver (a reboot restores it)"
       sleep 3
