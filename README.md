@@ -29,6 +29,19 @@ Key finding: `cfg80211`/`mac80211` on the device are Qualcomm's, not Google's. T
 
 **Optional variant B — the NetHunter kernel.** What a module on the stock kernel cannot add (System V IPC for PostgreSQL and the Metasploit database, CAN ISO-TP/J1939, BNEP, USB RNDIS/QMI/MBIM, RNDIS gadget, old USB Wi-Fi AR9170/ZD1211/Broadcom 4320) comes from an own boot kernel: the same Google kernel, built from the same ACK commit and the stock config, with a KMI identical to Google's build. The module stays the same and turns these features on by itself when that kernel runs — see [Variant B](#variant-b-the-nethunter-kernel-optional).
 
+**At a glance — module only vs. module + the NetHunter kernel:**
+
+| Capability | Module only (stock GKI kernel) | + NetHunter kernel (variant B) |
+|---|---|---|
+| Built-in Wi-Fi **monitor + packet injection**, and a **monitor alongside a live Wi-Fi link or SoftAP** (STA/AP + monitor coexistence) | ✅ | ✅ |
+| 69 driver modules: Bluetooth (`hci0`), USB HID / Arsenal (BadUSB), USB-serial, USB-net, most USB Wi-Fi chipsets, SocketCAN basics (`can327`, `f81604`, `mcba_usb`) | ✅ | ✅ |
+| PostgreSQL + Metasploit database (System V IPC) | ❌ | ✅ |
+| CAN **ISO-TP / J1939** in-kernel, `tc` filters on CAN ids | ❌ | ✅ |
+| NFS client + server | ❌ | ✅ |
+| BNEP (Bluetooth PAN), PN533 NFC, BPA10x, USB CAN (Kvaser/EMS/ESD/UCAN), host RNDIS/QMI/MBIM/DM9601/MCS7830, RNDIS gadget, legacy USB Wi-Fi (AR9170 / ZD1211 / Broadcom 4320) | ❌ | 🟡 load |
+
+The module is the **same file** either way — it simply enables the kernel-only rows by itself when the NetHunter kernel is running. Per-feature detail is in [Feature status](#feature-status); the kernel, what it adds and how to flash it are in [Variant B](#variant-b-the-nethunter-kernel-optional). Both the module and the pre-built kernel `boot.img` ship together in each [release](../../releases).
+
 ---
 
 ## Feature status
@@ -43,6 +56,7 @@ Legend: ✅ verified live on the device · 🟡 built & loads, not exercised wit
 | Built-in Bluetooth as Linux `hci0` (`nh-bt` + `nh-btbridge`) | ✅ | classic inquiry + LE scan; works under SELinux Enforcing |
 | Built-in Wi-Fi **monitor mode** (`nh-wlan`) | ✅ | capture on 2.4/5 GHz, channel switching; receive-only with the stock driver |
 | Built-in Wi-Fi **packet injection** (`nh-wlan-driver`) | ✅ | the Wi-Fi driver rebuilt and swapped in automatically after boot, **still no custom kernel**: `aireplay-ng --test` 30/30 on 2.4 and 5 GHz, deauth + WPA2 handshake capture on 5 GHz, steady monitor RX — see [wlan-inject](wlan-inject/README.md) |
+| Built-in Wi-Fi **STA/AP + monitor coexistence** (`nh-wlan coex`) | ✅ | a dedicated `mon0` captures (and injects) **alongside a connected Wi-Fi link or a SoftAP**, on that link's channel, while the link stays up — no need to drop the connection. Verified live on WCN7750: stable capture (rx climbing past 300k frames), STA ping 0% loss throughout, real 802.11 radiotap frames, and the same beside a hostapd SoftAP. Channel-locked to the link (no hopping); for a full-band sweep use plain monitor mode |
 | External USB Wi-Fi: Atheros AR9271 (tested with TP-Link TL-WN722N **v1**) | ✅ | `ath9k_htc` loads on plug-in, `htc_9271` firmware loads, `wlan1` appears; monitor mode, `aireplay-ng --test` 30/30 on my AP; deauth + full WPA2 4-way handshake captured on my own network |
 | USB keyboard and mouse `nh-hid` (`/dev/hidg0`, `/dev/hidg1`, android-keyboard-gadget descriptors) | ✅ | the laptop sees both, key presses and mouse movement arrive; they stay through USB mode changes; `--app <package>` gives access to that app only (other uids are refused) |
 | USB Arsenal: HID keyboard+mouse, mass storage, ACM, ECM | ✅ | gadget functions enumerate on a host PC (stock-kernel gadget) |
